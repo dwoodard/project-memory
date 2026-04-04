@@ -1,0 +1,26 @@
+{
+  "name": "project-memory",
+  "version": "1.0.0",
+  "description": "Deterministic memory system for AI-assisted coding sessions",
+  "main": "dist/index.js",
+  "bin": {
+    "project-memory": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "commander": "^14.0.3",
+    "kuzu": "^0.11.3"
+  }
+}
