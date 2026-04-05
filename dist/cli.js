@@ -522,6 +522,12 @@ tasksCmd
     const pid = config.projectId;
     const { escape: esc } = await Promise.resolve().then(() => __importStar(require("./kuzu-helpers.js")));
     if (opts.all) {
+        const { confirm } = await Promise.resolve().then(() => __importStar(require("@inquirer/prompts")));
+        const ok = await confirm({ message: "Remove all tasks for this project?", default: false });
+        if (!ok) {
+            console.log("Cancelled.");
+            return;
+        }
         const rows = await (0, kuzu_helpers_js_1.queryAll)(conn, `MATCH (t:Task {projectId: '${pid}'}) RETURN count(t) AS cnt`);
         const cnt = Number(rows[0]?.["cnt"] ?? 0);
         await conn.query(`MATCH (t:Task {projectId: '${pid}'}) DETACH DELETE t`);
@@ -608,6 +614,12 @@ sessionsCmd
     const pid = config.projectId;
     const { escape: esc } = await Promise.resolve().then(() => __importStar(require("./kuzu-helpers.js")));
     if (opts.all) {
+        const { confirm } = await Promise.resolve().then(() => __importStar(require("@inquirer/prompts")));
+        const ok = await confirm({ message: "Remove all sessions, memories, and artifacts for this project?", default: false });
+        if (!ok) {
+            console.log("Cancelled.");
+            return;
+        }
         const mRows = await (0, kuzu_helpers_js_1.queryAll)(conn, `MATCH (m:Memory {projectId: '${pid}'}) RETURN count(m) AS cnt`);
         const aRows = await (0, kuzu_helpers_js_1.queryAll)(conn, `MATCH (a:Artifact {projectId: '${pid}'}) RETURN count(a) AS cnt`);
         const sRows = await (0, kuzu_helpers_js_1.queryAll)(conn, `MATCH (s:Session {projectId: '${pid}'}) RETURN count(s) AS cnt`);
