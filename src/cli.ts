@@ -352,10 +352,11 @@ program
   });
 
 const HOOK_SCRIPTS: Record<string, string> = {
-  "stop":          "hook.js",
-  "user-prompt":   "hook-user-prompt.js",
-  "compact":       "hook-compact.js",
-  "post-tool-use": "hook-post-tool-use.js",
+  "stop":           "hook.js",
+  "user-prompt":    "hook-user-prompt.js",
+  "compact":        "hook-compact.js",
+  "post-tool-use":  "hook-post-tool-use.js",
+  "session-start":  "hook-session-start.js",
 };
 
 program

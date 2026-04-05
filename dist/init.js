@@ -135,6 +135,7 @@ function writeClaudeSettings(repoRoot) {
             entries.push(hookEntry(type));
         hooks[event] = entries;
     };
+    upsertHook("SessionStart", "session-start");
     upsertHook("UserPromptSubmit", "user-prompt");
     upsertHook("Stop", "stop");
     upsertHook("PreCompact", "compact");

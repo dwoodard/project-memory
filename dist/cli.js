@@ -336,6 +336,7 @@ const HOOK_SCRIPTS = {
     "user-prompt": "hook-user-prompt.js",
     "compact": "hook-compact.js",
     "post-tool-use": "hook-post-tool-use.js",
+    "session-start": "hook-session-start.js",
 };
 program
     .command("hook <type>")
