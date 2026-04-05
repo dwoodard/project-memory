@@ -20,6 +20,7 @@ export interface Session {
   id: string;
   projectId: string;
   startedAt: string;
+  title: string;
   summary: string;
 }
 
@@ -66,14 +67,6 @@ export interface Turn {
     content: string;
   }>;
   files?: string[];
-}
-
-export interface ProjectConfig {
-  projectId: string;
-  projectName: string;
-  remoteUrl: string;
-  repoPath: string;
-  createdAt: string;
 }
 
 export interface ContextBundle {

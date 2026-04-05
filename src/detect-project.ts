@@ -2,7 +2,7 @@ import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import type { ProjectConfig } from "./types.js";
+import type { ProjectConfig } from "./config.js";
 
 export function findRepoRoot(startDir: string): string | null {
   let dir = startDir;

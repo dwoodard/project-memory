@@ -17,8 +17,8 @@ import * as fs from "fs";
 import { findProjectMemoryDir } from "./hook-utils.js";
 import { readProjectConfig } from "./config.js";
 import { getDb } from "./db.js";
-import { queryAll } from "./kuzu-helpers.js";
-import type { Memory, Task } from "./types.js";
+import { queryAll, escape } from "./kuzu-helpers.js";
+import type { Session, Task } from "./types.js";
 
 interface SessionStartPayload {
   session_id: string;
@@ -26,17 +26,34 @@ interface SessionStartPayload {
   hook_event_name: string;
 }
 
-const BUDGET = 3000;
+const BUDGET = 2000;
 
 function truncate(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
 }
 
+/**
+ * Extract a useful excerpt from a session summary.
+ * If it's an LLM-generated paragraph (no rolling-log markers), use it directly.
+ * If it's the raw rolling log format, pull the last user message.
+ */
+function extractSummaryExcerpt(summary: string): string {
+  if (!summary) return "";
+  // Rolling log has [timestamp] markers — detect and extract last user message
+  if (/^\[20\d\d-/.test(summary.trim())) {
+    const segments = summary.split(/\n---\n/);
+    const last = segments[segments.length - 1]?.trim() ?? "";
+    const match = last.match(/^User:\s*(.+)/m);
+    return match?.[1]?.trim() ?? last.slice(0, 200);
+  }
+  // LLM-generated summary — use directly
+  return summary.slice(0, 300);
+}
+
 function buildBundle(
   activeTask: Task | null,
   pending: Task[],
-  decisions: Memory[],
-  facts: Memory[]
+  lastSession: Session | null
 ): string {
   const lines: string[] = [];
   let remaining = BUDGET;
@@ -45,7 +62,7 @@ function buildBundle(
     if (remaining <= 0) return;
     const safe = truncate(line, remaining);
     lines.push(safe);
-    remaining -= safe.length + 1; // +1 for newline
+    remaining -= safe.length + 1;
   };
 
   push(`## project-memory CLI`);
@@ -53,7 +70,8 @@ function buildBundle(
   push(`project-memory tasks start <n>    — set task active by queue position`);
   push(`project-memory tasks done         — complete the active task`);
   push(`project-memory tasks add "title"  — add a task to the queue`);
-  push(`project-memory tasks block "why"  — mark active task blocked`);
+  push(`project-memory tasks block "why"   — mark active task blocked`);
+  push(`project-memory tasks remove <n>   — delete a task by position or id`);
   push(`project-memory tasks move <f> <t> — reorder queue`);
   push(`project-memory context            — show full memory context`);
   push(`project-memory status             — show memory stats`);
@@ -65,7 +83,6 @@ function buildBundle(
     push(`## Tasks`);
     if (activeTask) {
       push(`ACTIVE: ${activeTask.title}`);
-      if (activeTask.summary) push(activeTask.summary);
     }
     if (pending.length > 0) {
       push(`Queue:`);
@@ -75,15 +92,11 @@ function buildBundle(
     push("");
   }
 
-  if (decisions.length > 0) {
-    push(`## Recent Decisions`);
-    for (const d of decisions) push(`- **${d.title}**: ${d.summary}`);
-    push("");
-  }
-
-  if (facts.length > 0) {
-    push(`## Key Facts`);
-    for (const f of facts) push(`- ${f.title}: ${f.summary}`);
+  if (lastSession) {
+    push(`## Last Session`);
+    push(lastSession.title || lastSession.id);
+    const excerpt = extractSummaryExcerpt(lastSession.summary);
+    if (excerpt) push(truncate(excerpt, 300));
   }
 
   return lines.join("\n").trim();
@@ -111,6 +124,7 @@ async function main(): Promise<void> {
     const config = readProjectConfig(projectMemoryDir);
     const { conn } = getDb(projectMemoryDir);
     const pid = config.projectId;
+    const currentSessionId = payload.session_id;
 
     const activeRows = await queryAll(conn,
       `MATCH (t:Task {projectId: '${pid}', status: 'active'})
@@ -120,23 +134,18 @@ async function main(): Promise<void> {
       `MATCH (t:Task {projectId: '${pid}', status: 'pending'})
        RETURN t ORDER BY t.taskOrder ASC LIMIT 3`
     );
-    const decisionRows = await queryAll(conn,
-      `MATCH (m:Memory {projectId: '${pid}', kind: 'decision'})
-       RETURN m ORDER BY m.createdAt DESC LIMIT 3`
-    );
-    const factRows = await queryAll(conn,
-      `MATCH (m:Memory {projectId: '${pid}', kind: 'fact'})
-       RETURN m ORDER BY m.createdAt DESC LIMIT 2`
+    // Most recent session for this project, excluding the current one
+    const lastSessionRows = await queryAll(conn,
+      `MATCH (s:Session {projectId: '${pid}'})
+       WHERE s.id <> '${escape(currentSessionId)}'
+       RETURN s ORDER BY s.startedAt DESC LIMIT 1`
     );
 
     const activeTask = activeRows[0]?.["t"] as Task | undefined ?? null;
     const pending = pendingRows.map((r) => r["t"] as Task);
-    const decisions = decisionRows.map((r) => r["m"] as Memory);
-    const facts = factRows.map((r) => r["m"] as Memory);
+    const lastSession = lastSessionRows[0]?.["s"] as Session | undefined ?? null;
 
-    // Always emit at minimum the CLI reference if the project is initialized
-
-    const bundle = buildBundle(activeTask, pending, decisions, facts);
+    const bundle = buildBundle(activeTask, pending, lastSession);
     if (bundle) process.stdout.write(bundle + "\n");
   } catch {
     // Never block session start

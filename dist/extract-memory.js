@@ -43,6 +43,7 @@ exports.reviewCandidates = reviewCandidates;
 exports.writeCandidateFile = writeCandidateFile;
 exports.readAllCandidates = readAllCandidates;
 exports.clearCandidates = clearCandidates;
+exports.summarizeSession = summarizeSession;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
@@ -202,6 +203,42 @@ function clearCandidates(projectMemoryDir) {
     fs.readdirSync(dir)
         .filter((f) => f.endsWith(".json"))
         .forEach((f) => fs.unlinkSync(path.join(dir, f)));
+}
+// ─── Session summarization ───────────────────────────────────────────────────
+const SESSION_SUMMARY_PROMPT = `You are a session summarizer for an AI coding assistant.
+
+Project: {PROJECT_NAME}
+
+Here is the raw conversation log from this session:
+---
+{SESSION_LOG}
+---
+
+Generate:
+1. A short title (max 60 chars) capturing the main topic or goal of this session
+2. A 2-3 sentence summary of what was discussed and accomplished
+
+Respond with JSON only. No markdown fences.
+{"title": "...", "summary": "..."}`;
+async function summarizeSession(rawLog, projectName) {
+    if (!rawLog.trim())
+        return { title: "", summary: "" };
+    const truncatedLog = rawLog.length > 4000 ? rawLog.slice(0, 4000) + "\n...[truncated]" : rawLog;
+    const prompt = SESSION_SUMMARY_PROMPT
+        .replace("{PROJECT_NAME}", projectName)
+        .replace("{SESSION_LOG}", truncatedLog);
+    const response = await (0, llm_js_1.llmComplete)(prompt);
+    try {
+        const trimmed = response.trim().replace(/^```[a-z]*\n?/, "").replace(/\n?```$/, "");
+        const parsed = JSON.parse(trimmed);
+        return {
+            title: String(parsed.title ?? "").slice(0, 60),
+            summary: String(parsed.summary ?? ""),
+        };
+    }
+    catch {
+        return { title: "", summary: "" };
+    }
 }
 // ─── Parsing ─────────────────────────────────────────────────────────────────
 function parseCandidates(response, sessionId, turnId, maxItems = 2) {

@@ -8,10 +8,12 @@
 
 import * as fs from "fs";
 import { findProjectMemoryDir } from "./hook-utils.js";
-import { readAllCandidates, reviewCandidates, clearCandidates } from "./extract-memory.js";
+import { readAllCandidates, reviewCandidates, clearCandidates, summarizeSession } from "./extract-memory.js";
 import { promoteToDb, getExistingMemories } from "./promote-memory.js";
 import { readProjectConfig } from "./config.js";
 import { getDb } from "./db.js";
+import { readSummary } from "./update-summary.js";
+import { escape } from "./kuzu-helpers.js";
 
 interface CompactPayload {
   session_id: string;
@@ -43,8 +45,25 @@ async function main(): Promise<void> {
     if (!config.llm?.model || config.llm.model === "local-model") process.exit(0);
 
     const { conn } = getDb(projectMemoryDir);
+    const sessionId = payload.session_id;
 
-    // Read all candidates accumulated during this session
+    // Generate a meaningful title and summary for this session
+    const rawLog = readSummary(projectMemoryDir, sessionId);
+    if (rawLog) {
+      try {
+        const { title, summary } = await summarizeSession(rawLog, config.projectName);
+        if (title || summary) {
+          await conn.query(
+            `MATCH (s:Session {id: '${escape(sessionId)}'})
+             SET s.title = '${escape(title)}', s.summary = '${escape(summary)}'`
+          );
+        }
+      } catch {
+        // Don't block on summarization failure
+      }
+    }
+
+    // Review and promote accumulated memory candidates
     const candidates = readAllCandidates(projectMemoryDir);
     if (candidates.length === 0) process.exit(0);
 

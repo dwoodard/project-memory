@@ -136,15 +136,18 @@ async function applySchema(conn) {
                 continue;
             const status = String(m["status"] || "pending");
             const taskOrder = Number(m["taskOrder"] ?? 0);
+            const projectId = String(m["projectId"] ?? "");
             await conn.query(`CREATE (t:Task {
           id: '${esc(id)}',
           title: '${esc(String(m["title"] ?? ""))}',
           summary: '${esc(String(m["summary"] ?? ""))}',
           status: '${esc(status)}',
           taskOrder: ${taskOrder},
-          projectId: '${esc(String(m["projectId"] ?? ""))}',
+          projectId: '${esc(projectId)}',
           createdAt: '${esc(String(m["createdAt"] ?? new Date().toISOString()))}'
         })`);
+            await conn.query(`MATCH (p:Project {id: '${esc(projectId)}'}), (t:Task {id: '${esc(id)}'})
+         CREATE (p)-[:HAS_TASK]->(t)`);
         }
         // Remove migrated task Memory nodes
         if (rows.length > 0) {
@@ -163,4 +166,12 @@ async function applySchema(conn) {
         await conn.query(`ALTER TABLE Session ADD title STRING DEFAULT ''`);
     }
     catch { /* exists */ }
+    // Backfill: connect orphaned Task nodes to their Project via HAS_TASK
+    try {
+        await conn.query(`MATCH (t:Task)
+       WHERE NOT EXISTS { MATCH (p:Project)-[:HAS_TASK]->(t) }
+       MATCH (p:Project {id: t.projectId})
+       CREATE (p)-[:HAS_TASK]->(t)`);
+    }
+    catch { /* no orphans or table doesn't exist yet */ }
 }

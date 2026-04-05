@@ -1,7 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import type { Turn, ProjectConfig } from "./types.js";
+import type { Turn } from "./types.js";
+import type { ProjectConfig } from "./config.js";
 
 export function appendTurn(
   turn: Turn,

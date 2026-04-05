@@ -420,30 +420,50 @@ const tasksCmd = program
   .description("Manage project tasks");
 
 // Default action: list all tasks
-tasksCmd.action(async () => {
-  const { config, conn } = await getProjectDb(process.cwd());
-  const pid = config.projectId;
+tasksCmd
+  .option("--all", "Show all done tasks, not just the last 10")
+  .action(async () => {
+    const opts = tasksCmd.opts();
+    const { config, conn } = await getProjectDb(process.cwd());
+    const pid = config.projectId;
 
-  const activeRows = await queryAll(conn,
-    `MATCH (m:Task {projectId: '${pid}', status: 'active'})
-     RETURN m ORDER BY m.createdAt DESC LIMIT 1`);
-  const pendingRows = await queryAll(conn,
-    `MATCH (m:Task {projectId: '${pid}', status: 'pending'})
-     RETURN m ORDER BY m.taskOrder ASC`);
-  const blockedRows = await queryAll(conn,
-    `MATCH (m:Task {projectId: '${pid}', status: 'blocked'})
-     RETURN m ORDER BY m.createdAt DESC`);
-  const doneRows = await queryAll(conn,
-    `MATCH (m:Task {projectId: '${pid}', status: 'done'})
-     RETURN m ORDER BY m.createdAt DESC LIMIT 10`);
+    const activeRows = await queryAll(conn,
+      `MATCH (m:Task {projectId: '${pid}', status: 'active'})
+       RETURN m ORDER BY m.createdAt DESC LIMIT 1`);
+    const pendingRows = await queryAll(conn,
+      `MATCH (m:Task {projectId: '${pid}', status: 'pending'})
+       RETURN m ORDER BY m.taskOrder ASC`);
+    const blockedRows = await queryAll(conn,
+      `MATCH (m:Task {projectId: '${pid}', status: 'blocked'})
+       RETURN m ORDER BY m.createdAt DESC`);
+    if (opts.all) {
+      const allRows = await queryAll(conn,
+        `MATCH (t:Task {projectId: '${pid}'}) RETURN t ORDER BY t.taskOrder ASC, t.createdAt ASC`);
+      const statusOrder = ["active", "pending", "blocked", "done"];
+      const all = allRows
+        .map((r) => r["t"] as Record<string, unknown>)
+        .sort((a, b) => statusOrder.indexOf(String(a["status"])) - statusOrder.indexOf(String(b["status"])));
+      if (all.length === 0) {
+        console.log("No tasks.");
+      } else {
+        all.forEach((t) =>
+          console.log(`  [${shortId(String(t["id"]))}]  ${String(t["status"]).padEnd(8)}  ${t["title"]}`)
+        );
+      }
+      return;
+    }
 
-  printTaskList(
-    activeRows[0]?.["m"] as Record<string, unknown> | undefined,
-    pendingRows.map((r) => r["m"] as Record<string, unknown>),
-    blockedRows.map((r) => r["m"] as Record<string, unknown>),
-    doneRows.map((r) => r["m"] as Record<string, unknown>)
-  );
-});
+    const doneRows = await queryAll(conn,
+      `MATCH (m:Task {projectId: '${pid}', status: 'done'})
+       RETURN m ORDER BY m.createdAt DESC LIMIT 10`);
+
+    printTaskList(
+      activeRows[0]?.["m"] as Record<string, unknown> | undefined,
+      pendingRows.map((r) => r["m"] as Record<string, unknown>),
+      blockedRows.map((r) => r["m"] as Record<string, unknown>),
+      doneRows.map((r) => r["m"] as Record<string, unknown>)
+    );
+  });
 
 tasksCmd
   .command("add <title>")
@@ -472,6 +492,11 @@ tasksCmd
         projectId: '${esc(pid)}',
         createdAt: '${new Date().toISOString()}'
       })`
+    );
+
+    await conn.query(
+      `MATCH (p:Project {id: '${esc(pid)}'}), (t:Task {id: '${esc(id)}'})
+       CREATE (p)-[:HAS_TASK]->(t)`
     );
 
     console.log(`Added: ${title}  [${shortId(id)}]`);
@@ -576,6 +601,56 @@ tasksCmd
   });
 
 tasksCmd
+  .command("remove [target]")
+  .description("Remove a task by queue position or id prefix; --all removes every task")
+  .option("--all", "Remove all tasks for this project")
+  .action(async (target: string | undefined, opts: { all?: boolean }) => {
+    const { config, conn } = await getProjectDb(process.cwd());
+    const pid = config.projectId;
+    const { escape: esc } = await import("./kuzu-helpers.js");
+
+    if (opts.all) {
+      const { confirm } = await import("@inquirer/prompts");
+      const ok = await confirm({ message: "Remove all tasks for this project?", default: false });
+      if (!ok) { console.log("Cancelled."); return; }
+      const rows = await queryAll(conn, `MATCH (t:Task {projectId: '${pid}'}) RETURN count(t) AS cnt`);
+      const cnt = Number(rows[0]?.["cnt"] ?? 0);
+      await conn.query(`MATCH (t:Task {projectId: '${pid}'}) DETACH DELETE t`);
+      console.log(`Removed ${cnt} task(s).`);
+      return;
+    }
+
+    if (!target) {
+      console.error("Specify a task position or id, or use --all.");
+      process.exit(1);
+    }
+
+    const allRows = await queryAll(conn,
+      `MATCH (t:Task {projectId: '${pid}'})
+       WHERE t.status <> 'done'
+       RETURN t ORDER BY t.taskOrder ASC`);
+    const all = allRows.map((r) => r["t"] as Record<string, unknown>);
+
+    let targetId: string | undefined;
+    const pos = parseInt(target, 10);
+    if (!isNaN(pos) && pos >= 1 && pos <= all.length) {
+      targetId = String(all[pos - 1]["id"]);
+    } else {
+      const match = all.find((t) => String(t["id"]).includes(target));
+      targetId = match ? String(match["id"]) : undefined;
+    }
+
+    if (!targetId) {
+      console.error(`No task matching "${target}". Run: project-memory tasks`);
+      process.exit(1);
+    }
+
+    const task = all.find((t) => String(t["id"]) === targetId);
+    await conn.query(`MATCH (t:Task {id: '${esc(targetId)}'}) DETACH DELETE t`);
+    console.log(`Removed: ${task?.["title"]}`);
+  });
+
+tasksCmd
   .command("move <from> <to>")
   .description("Reorder queue: move task at position <from> to position <to>")
   .action(async (fromStr: string, toStr: string) => {
@@ -610,6 +685,77 @@ tasksCmd
     pending.forEach((t, i) =>
       console.log(`  ${i + 1}  ${t["title"]}`)
     );
+  });
+
+// ── Sessions ─────────────────────────────────────────────────────────────────
+
+const sessionsCmd = program
+  .command("sessions")
+  .description("Manage project sessions");
+
+sessionsCmd
+  .action(async () => {
+    const { config, conn } = await getProjectDb(process.cwd());
+    const pid = config.projectId;
+    const rows = await queryAll(conn,
+      `MATCH (s:Session {projectId: '${pid}'})
+       RETURN s ORDER BY s.startedAt DESC`);
+    if (rows.length === 0) {
+      console.log("No sessions.");
+      return;
+    }
+    rows.forEach((r) => {
+      const s = r["s"] as Record<string, unknown>;
+      const ts = s["startedAt"] ? new Date(String(s["startedAt"])).toLocaleString() : "unknown";
+      const title = s["title"] ? `  ${s["title"]}` : "";
+      console.log(`  [${shortId(String(s["id"]))}]  ${ts}${title}`);
+    });
+  });
+
+sessionsCmd
+  .command("remove [target]")
+  .description("Remove a session by id prefix; --all removes every session and its memories")
+  .option("--all", "Remove all sessions (and their memories/artifacts) for this project")
+  .action(async (target: string | undefined, opts: { all?: boolean }) => {
+    const { config, conn } = await getProjectDb(process.cwd());
+    const pid = config.projectId;
+    const { escape: esc } = await import("./kuzu-helpers.js");
+
+    if (opts.all) {
+      const { confirm } = await import("@inquirer/prompts");
+      const ok = await confirm({ message: "Remove all sessions, memories, and artifacts for this project?", default: false });
+      if (!ok) { console.log("Cancelled."); return; }
+      const mRows = await queryAll(conn, `MATCH (m:Memory {projectId: '${pid}'}) RETURN count(m) AS cnt`);
+      const aRows = await queryAll(conn, `MATCH (a:Artifact {projectId: '${pid}'}) RETURN count(a) AS cnt`);
+      const sRows = await queryAll(conn, `MATCH (s:Session {projectId: '${pid}'}) RETURN count(s) AS cnt`);
+      await conn.query(`MATCH (m:Memory {projectId: '${pid}'}) DETACH DELETE m`);
+      await conn.query(`MATCH (a:Artifact {projectId: '${pid}'}) DETACH DELETE a`);
+      await conn.query(`MATCH (s:Session {projectId: '${pid}'}) DETACH DELETE s`);
+      const sc = Number(sRows[0]?.["cnt"] ?? 0);
+      const mc = Number(mRows[0]?.["cnt"] ?? 0);
+      const ac = Number(aRows[0]?.["cnt"] ?? 0);
+      console.log(`Removed ${sc} session(s), ${mc} memory node(s), ${ac} artifact(s).`);
+      return;
+    }
+
+    if (!target) {
+      console.error("Specify a session id prefix, or use --all.");
+      process.exit(1);
+    }
+
+    const rows = await queryAll(conn,
+      `MATCH (s:Session {projectId: '${pid}'}) RETURN s`);
+    const sessions = rows.map((r) => r["s"] as Record<string, unknown>);
+    const match = sessions.find((s) => String(s["id"]).includes(target));
+    if (!match) {
+      console.error(`No session matching "${target}". Run: project-memory sessions`);
+      process.exit(1);
+    }
+    const sid = String(match["id"]);
+    await conn.query(`MATCH (m:Memory {sessionId: '${esc(sid)}'}) DETACH DELETE m`);
+    await conn.query(`MATCH (a:Artifact {sessionId: '${esc(sid)}'}) DETACH DELETE a`);
+    await conn.query(`MATCH (s:Session {id: '${esc(sid)}'}) DETACH DELETE s`);
+    console.log(`Removed session [${shortId(sid)}] and its memories/artifacts.`);
   });
 
 // ─────────────────────────────────────────────────────────────────────────────
