@@ -871,9 +871,19 @@ const HOOK_SCRIPTS: Record<string, string> = {
 };
 
 program
-  .command("hook <type>")
+  .command("hook [type]")
   .description("Run a Claude Code hook (reads JSON payload from stdin)")
-  .action((type: string) => {
+  .action((type: string | undefined) => {
+    if (!type) {
+      console.log("Usage: pensive hook <type>\n");
+      console.log("Available hook types:");
+      for (const [name, script] of Object.entries(HOOK_SCRIPTS)) {
+        console.log(`  ${name.padEnd(16)} (${script})`);
+      }
+      console.log("\nThese are registered automatically in .claude/settings.json and .github/settings.json");
+      console.log("by running: pensive init");
+      process.exit(0);
+    }
     const script = HOOK_SCRIPTS[type];
     if (!script) {
       console.error(`Unknown hook type: ${type}`);

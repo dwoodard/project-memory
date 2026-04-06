@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "pensive hook post-tool-use"
+      }
+    ],
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "pensive hook session-start"
+      }
+    ]
+  }
+}

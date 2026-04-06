@@ -18,7 +18,9 @@ export async function initProject(cwd: string): Promise<void> {
   // Idempotent — check if already initialized
   if (fs.existsSync(configPath)) {
     const existing: ProjectConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    console.log(`Already initialized: ${existing.projectName} (${existing.projectId})`);
+    console.log(`Already initialized: ${existing.projectName}`);
+    console.log(`  ID:   ${existing.projectId}`);
+    console.log(`  Path: ${repoRoot}`);
     return;
   }
 
