@@ -649,26 +649,42 @@ tasksCmd
   });
 
 tasksCmd
-  .command("done")
-  .description("Mark the active task as done")
-  .action(async () => {
+  .command("done [targets...]")
+  .description("Mark tasks as done — active task if no args, or by id prefix/queue position")
+  .action(async (targets: string[]) => {
     const { config, conn } = await getProjectDb(process.cwd());
     const pid = config.projectId;
+    const { escape: esc } = await import("./kuzu-helpers.js");
 
-    const rows = await queryAll(conn,
-      `MATCH (m:Task {projectId: '${pid}', status: 'active'})
-       RETURN m LIMIT 1`);
-    if (rows.length === 0) {
-      console.log("No active task.");
+    if (targets.length === 0) {
+      const rows = await queryAll(conn,
+        `MATCH (m:Task {projectId: '${pid}', status: 'active'})
+         RETURN m LIMIT 1`);
+      if (rows.length === 0) { console.log("No active task."); return; }
+      const task = rows[0]["m"] as Record<string, unknown>;
+      await conn.query(`MATCH (m:Task {id: '${esc(String(task["id"]))}' }) SET m.status = 'done'`);
+      console.log(`Done: ${task["title"]}`);
       return;
     }
 
-    const { escape: esc } = await import("./kuzu-helpers.js");
-    const task = rows[0]["m"] as Record<string, unknown>;
-    await conn.query(
-      `MATCH (m:Task {id: '${esc(String(task["id"]))}' }) SET m.status = 'done'`
-    );
-    console.log(`Done: ${task["title"]}`);
+    const allRows = await queryAll(conn,
+      `MATCH (m:Task {projectId: '${pid}'}) WHERE m.status <> 'done'
+       RETURN m ORDER BY m.taskOrder ASC`);
+    const all = allRows.map((r) => r["m"] as Record<string, unknown>);
+    const pending = all.filter((t) => t["status"] === "pending");
+
+    for (const target of targets) {
+      let task: Record<string, unknown> | undefined;
+      const pos = parseInt(target, 10);
+      if (!isNaN(pos) && pos >= 1 && pos <= pending.length) {
+        task = pending[pos - 1];
+      } else {
+        task = all.find((t) => String(t["id"]).includes(target));
+      }
+      if (!task) { console.error(`No task matching "${target}"`); continue; }
+      await conn.query(`MATCH (m:Task {id: '${esc(String(task["id"]))}' }) SET m.status = 'done'`);
+      console.log(`Done: ${task["title"]}`);
+    }
   });
 
 tasksCmd
