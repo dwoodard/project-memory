@@ -805,20 +805,63 @@ const sessionsCmd = program
   .description("Manage project sessions");
 
 sessionsCmd
+  .argument("[id]", "Session id prefix to view in detail")
   .option("--all", "Show archived sessions too")
-  .action(async (opts: { all?: boolean }) => {
+  .action(async (id: string | undefined, opts: { all?: boolean }) => {
     const { config, conn } = await getProjectDb(process.cwd());
     const pid = config.projectId;
+
+    // Detail view
+    if (id) {
+      const rows = await queryAll(conn, `MATCH (s:Session {projectId: '${pid}'}) RETURN s`);
+      const sessions = rows.map((r) => r["s"] as Record<string, unknown>);
+      const match = sessions.find((s) => String(s["id"]).includes(id));
+      if (!match) {
+        cerr(`No session matching "${id}". Run: pensive sessions`);
+        process.exit(1);
+      }
+      const sid = String(match["id"]);
+      const ts = match["startedAt"] ? new Date(String(match["startedAt"])).toLocaleString() : "unknown";
+      const archived = match["archived"] ? chalk.dim("  [archived]") : "";
+
+      console.log(`\n${chalk.bold.cyan("── Session ──────────────────────────────")}`);
+      console.log(`  ID:      ${chalk.dim("[" + shortId(sid) + "]")}`);
+      console.log(`  Started: ${chalk.dim(ts)}${archived}`);
+      if (match["title"]) console.log(`  Title:   ${chalk.white(String(match["title"]))}`);
+
+      if (match["summary"]) {
+        console.log(`\n${chalk.bold.cyan("── Summary ──────────────────────────────")}`);
+        console.log(chalk.dim(String(match["summary"])));
+      }
+
+      const memRows = await queryAll(conn,
+        `MATCH (s:Session {id: '${sid}'})-[:HAS_MEMORY]->(m:Memory)
+         RETURN m ORDER BY m.createdAt ASC`);
+      if (memRows.length > 0) {
+        console.log(`\n${chalk.bold.cyan("── Memories ─────────────────────────────")}`);
+        memRows.forEach((r) => {
+          const m = r["m"] as Record<string, unknown>;
+          console.log(`  ${chalk.dim("[" + String(m["kind"]).toUpperCase() + "]")} ${chalk.white(String(m["title"]))}`);
+          if (m["summary"]) console.log(`    ${chalk.dim(String(m["summary"]))}`);
+        });
+      } else {
+        console.log(chalk.dim("\n  No memories for this session."));
+      }
+      console.log("");
+      return;
+    }
+
+    // List view
     const filter = opts.all ? "" : " AND (s.archived = false OR s.archived IS NULL)";
-    const rows = await queryAll(conn,
+    const listRows = await queryAll(conn,
       `MATCH (s:Session {projectId: '${pid}'})
        WHERE true${filter}
        RETURN s ORDER BY s.startedAt DESC`);
-    if (rows.length === 0) {
+    if (listRows.length === 0) {
       console.log(opts.all ? "No sessions." : "No active sessions. Use --all to include archived.");
       return;
     }
-    rows.forEach((r) => {
+    listRows.forEach((r) => {
       const s = r["s"] as Record<string, unknown>;
       const ts = s["startedAt"] ? new Date(String(s["startedAt"])).toLocaleString() : "unknown";
       const title = s["title"] ? `  ${s["title"]}` : "";
