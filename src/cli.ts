@@ -489,8 +489,8 @@ function printTaskList(
   }
 
   if (active) {
-    console.log(`\n● ACTIVE   ${active["title"]}`);
-    if (active["summary"]) console.log(`           ${active["summary"]}`);
+    console.log(`\n● ACTIVE [${shortId(String(active["id"]))}]   ${active["title"]}`);
+    if (active["summary"]) console.log(`                      ${active["summary"]}`);
   } else {
     console.log("\n  (no active task)");
   }
@@ -622,7 +622,7 @@ tasksCmd
     if (!isNaN(pos) && pos >= 1 && pos <= pending.length) {
       target_id = String(pending[pos - 1]["id"]);
     } else {
-      const match = pending.find((t) => String(t["id"]).includes(target));
+      const match = pending.find((t) => shortId(String(t["id"])).startsWith(target));
       target_id = match ? String(match["id"]) : undefined;
     }
 
@@ -679,7 +679,7 @@ tasksCmd
       if (!isNaN(pos) && pos >= 1 && pos <= pending.length) {
         task = pending[pos - 1];
       } else {
-        task = all.find((t) => String(t["id"]).includes(target));
+        task = all.find((t) => shortId(String(t["id"])).startsWith(target));
       }
       if (!task) { console.error(`No task matching "${target}"`); continue; }
       await conn.query(`MATCH (m:Task {id: '${esc(String(task["id"]))}' }) SET m.status = 'done'`);
@@ -749,7 +749,7 @@ tasksCmd
     if (!isNaN(pos) && pos >= 1 && pos <= all.length) {
       targetId = String(all[pos - 1]["id"]);
     } else {
-      const match = all.find((t) => String(t["id"]).includes(target));
+      const match = all.find((t) => shortId(String(t["id"])).startsWith(target));
       targetId = match ? String(match["id"]) : undefined;
     }
 
