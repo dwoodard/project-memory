@@ -685,6 +685,38 @@ tasksCmd
   });
 
 tasksCmd
+  .command("update <target> <text>")
+  .description("Update a task's title by queue position or id prefix")
+  .action(async (target: string, text: string) => {
+    const { config, conn } = await getProjectDb(process.cwd());
+    const pid = config.projectId;
+    const { escape: esc } = await import("./kuzu-helpers.js");
+
+    const allRows = await queryAll(conn,
+      `MATCH (t:Task {projectId: '${pid}'})
+       WHERE t.status <> 'done'
+       RETURN t ORDER BY t.taskOrder ASC`);
+    const all = allRows.map((r) => r["t"] as Record<string, unknown>);
+
+    let targetId: string | undefined;
+    const pos = parseInt(target, 10);
+    if (!isNaN(pos) && pos >= 1 && pos <= all.length) {
+      targetId = String(all[pos - 1]["id"]);
+    } else {
+      const match = all.find((t) => shortId(String(t["id"])).startsWith(target));
+      targetId = match ? String(match["id"]) : undefined;
+    }
+
+    if (!targetId) {
+      cerr(`No task matching "${target}". Run: pensive tasks`);
+      process.exit(1);
+    }
+
+    await conn.query(`MATCH (t:Task {id: '${esc(targetId)}'}) SET t.title = '${esc(text)}'`);
+    console.log(`${chalk.green("Updated:")} ${text}  ${chalk.dim("[" + shortId(targetId) + "]")}`);
+  });
+
+tasksCmd
   .command("start <target>")
   .description("Set a queued task active (by queue position or id prefix)")
   .action(async (target: string) => {
