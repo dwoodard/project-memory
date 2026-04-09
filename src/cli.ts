@@ -654,7 +654,7 @@ const tasksCmd = program
 
 // Default action: list all tasks
 tasksCmd
-  .option("--all", "Show all done tasks, not just the last 10")
+  .option("--done", "Include completed tasks in the output")
   .action(async () => {
     const opts = tasksCmd.opts();
     const { config, conn } = await getProjectDb(process.cwd());
@@ -672,28 +672,11 @@ tasksCmd
       `MATCH (m:Task {projectId: '${pid}', status: 'blocked'})
        WHERE m.parentId = '' OR m.parentId IS NULL
        RETURN m ORDER BY m.createdAt DESC`);
-    if (opts.all) {
-      const allRows = await queryAll(conn,
-        `MATCH (t:Task {projectId: '${pid}'}) WHERE t.parentId = '' OR t.parentId IS NULL RETURN t ORDER BY t.taskOrder ASC, t.createdAt ASC`);
-      const statusOrder = ["active", "pending", "blocked", "done"];
-      const all = allRows
-        .map((r) => r["t"] as Record<string, unknown>)
-        .sort((a, b) => statusOrder.indexOf(String(a["status"])) - statusOrder.indexOf(String(b["status"])));
-      if (all.length === 0) {
-        console.log(chalk.dim("No tasks."));
-      } else {
-        all.forEach((t) => {
-          const statusColor = t["status"] === "active" ? chalk.green : t["status"] === "blocked" ? chalk.yellow : t["status"] === "done" ? chalk.dim : chalk.white;
-          console.log(`  ${chalk.dim("[" + shortId(String(t["id"])) + "]")}  ${statusColor(String(t["status"]).padEnd(8))}  ${t["title"]}`);
-        });
-      }
-      return;
-    }
 
-    const doneRows = await queryAll(conn,
+    const doneRows = opts.done ? await queryAll(conn,
       `MATCH (m:Task {projectId: '${pid}', status: 'done'})
        WHERE m.parentId = '' OR m.parentId IS NULL
-       RETURN m ORDER BY m.createdAt DESC LIMIT 10`);
+       RETURN m ORDER BY m.createdAt DESC`) : [];
     const subtaskRows = await queryAll(conn,
       `MATCH (t:Task {projectId: '${pid}'}) WHERE t.parentId <> '' RETURN t`);
 
