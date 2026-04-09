@@ -2,11 +2,11 @@ import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
-/** Walk up from startDir looking for a .pensive/config.json — returns that dir or null */
+/** Walk up from startDir looking for a .pensieve/config.json — returns that dir or null */
 export function findProjectRoot(startDir: string): string | null {
   let dir = startDir;
   while (true) {
-    if (fs.existsSync(path.join(dir, ".pensive", "config.json"))) return dir;
+    if (fs.existsSync(path.join(dir, ".pensieve", "config.json"))) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
@@ -36,7 +36,7 @@ export function resolveProjectIdentity(projectRoot: string): {
   return { remoteUrl, projectName };
 }
 
-/** Find the nearest initialized pensive project walking up from cwd */
+/** Find the nearest initialized pensieve project walking up from cwd */
 export function detectProject(cwd: string): {
   projectRoot: string;
   remoteUrl?: string;

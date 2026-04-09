@@ -34,6 +34,7 @@ Project
 ### Meaning of each layer
 
 #### Project
+
 A long-lived container for a body of work.
 
 Examples:
@@ -42,6 +43,7 @@ Examples:
 - Internal knowledge graph
 
 #### Session
+
 A working unit inside a project.
 
 Examples:
@@ -54,6 +56,7 @@ Examples:
 A session is where context is produced.
 
 #### Memory
+
 A compressed, reusable unit of recall.
 
 A memory is not the full document or transcript. It is the thing worth remembering later.
@@ -67,6 +70,7 @@ Examples:
 - a pointer to something worth reopening
 
 #### Artifact
+
 A full output or detailed object.
 
 Examples:
@@ -80,6 +84,7 @@ Examples:
 Artifacts are what you open when memory is not enough.
 
 #### Source
+
 Where the information came from.
 
 Examples:
@@ -125,6 +130,7 @@ Start with one `Memory` node label and a `kind` field.
 Recommended initial kinds:
 
 ### 1. Summary
+
 Compressed recap of a session, artifact, or outcome.
 
 Examples:
@@ -133,6 +139,7 @@ Examples:
 - Main risk is stale cache invalidation across tenants
 
 ### 2. Decision
+
 A choice that was made.
 
 Examples:
@@ -141,6 +148,7 @@ Examples:
 - Generate session summaries automatically
 
 ### 3. Fact
+
 A reusable claim or believed truth.
 
 Examples:
@@ -149,6 +157,7 @@ Examples:
 - Artifacts may hold full generated output
 
 ### 4. Reference
+
 A pointer saying something is worth looking up later.
 
 Examples:
@@ -161,6 +170,7 @@ This is especially important for your use case because it answers:
 **What do I remember so I know what to look up?**
 
 ### 5. Task
+
 Work to resume or follow up on.
 
 Examples:
@@ -169,6 +179,7 @@ Examples:
 - Add entity extraction before graph linking
 
 ### 6. Question
+
 An unresolved issue or uncertainty.
 
 Examples:
@@ -554,9 +565,11 @@ User prompt arrives
 This creates two working modes:
 
 ### Fast recall mode
+
 What do I probably need here?
 
 ### Deep lookup mode
+
 Open the full thing.
 
 That split is the foundation of a durable AI memory system.
@@ -875,7 +888,7 @@ Recommended shape:
 
 ```text
 your-repo/
-  .pensive/
+  .pensieve/
 ```
 
 This directory should be the **local runtime workspace**, not the long-term database.
@@ -894,7 +907,7 @@ Its purpose is to hold:
 Example structure:
 
 ```text
-.pensive/
+.pensieve/
   config.json
   sessions/
   interactions/
@@ -936,7 +949,7 @@ The first time AI is used inside a repo, the runtime should:
 1. detect repo root
 2. resolve repo name, remote, and branch
 3. create or match a `Project`
-4. create `.pensive/`
+4. create `.pensieve/`
 5. initialize project config
 6. create the first `Session`
 7. start logging interactions locally
@@ -986,7 +999,7 @@ This keeps the default experience relevant and avoids contamination from unrelat
 The runtime should be responsible for:
 
 - detecting the active project
-- managing `.pensive/`
+- managing `.pensieve/`
 - opening and updating sessions
 - retrieving context
 - recording interactions
@@ -1063,7 +1076,7 @@ The system should behave like:
 The next major areas to define are:
 
 1. **Runtime entry points** — how editor, CLI, and agents route through the system
-2. **Local workspace format** — what exactly lives in `.pensive/`
+2. **Local workspace format** — what exactly lives in `.pensieve/`
 3. **Sync strategy** — when local state becomes durable central memory
 4. **Memory ranking strategy** — how retrieval prioritizes memories and artifacts
 5. **Cross-project promotion** — how local project knowledge becomes globally reusable

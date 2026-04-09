@@ -93,12 +93,12 @@ Otherwise → discard
 
 #### Tool (global)
 
-- Lives in: `~/projects/pensive/`
+- Lives in: `~/projects/pensieve/`
 - Contains all runtime logic
 
 #### Per-project data
 
-- Lives in: `<repo>/.pensive/`
+- Lives in: `<repo>/.pensieve/`
 - Contains logs + memory for that repo
 
 ---
@@ -106,7 +106,7 @@ Otherwise → discard
 ## Local Project Structure
 
 ```text
-.pensive/
+.pensieve/
   config.json
   sessions/
   memories.jsonl
@@ -148,7 +148,7 @@ Canonical input shape:
   "files": []
 }
 Tool Structure
-pensive/
+pensieve/
   src/
     index.ts
     detect-project.ts
@@ -172,7 +172,7 @@ Generate:
 sync-db.ts
 Persist memory to DB
 Storage Strategy
-Local (.pensive)
+Local (.pensieve)
 noisy
 operational
 not used for retrieval
@@ -204,7 +204,7 @@ Strategy
 
 Adapters normalize input into:
 
-completed turn → pensive ingest-turn
+completed turn → pensieve ingest-turn
 First Adapter
 
 Start with:
@@ -220,12 +220,12 @@ CLI Interface
 
 Core command:
 
-pensive ingest-turn --input <file>
+pensieve ingest-turn --input <file>
 
 Optional:
 
-pensive init
-pensive sync
+pensieve init
+pensieve sync
 Memory Format (v1)
 {
   "id": "mem_001",
@@ -267,7 +267,7 @@ implement CLI skeleton
 implement project detection
 implement session logging
 implement memory extraction (simple prompt)
-write to .pensive/
+write to .pensieve/
 sync to DB
 integrate Claude Code hook
 test in real repo

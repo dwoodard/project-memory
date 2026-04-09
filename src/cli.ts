@@ -93,7 +93,7 @@ async function runConfigPrompt(projectMemoryDir: string): Promise<void> {
   config.embedding = { provider: embProvider, model: embModel, baseUrl: embBaseUrl, apiKey: embApiKey };
   writeProjectConfig(projectMemoryDir, config);
 
-  console.log(`\n${chalk.green("Saved to")} ${chalk.dim(".pensive/config.json")}`);
+  console.log(`\n${chalk.green("Saved to")} ${chalk.dim(".pensieve/config.json")}`);
   console.log(`  LLM:       ${chalk.white(llmProvider)} / ${chalk.dim(llmModel)}`);
   console.log(`  Embedding: ${chalk.white(embProvider)} / ${chalk.dim(embModel)}`);
 }
@@ -101,7 +101,7 @@ async function runConfigPrompt(projectMemoryDir: string): Promise<void> {
 const program = new Command();
 
 program
-  .name("pensive")
+  .name("pensieve")
   .description("Deterministic memory system for AI-assisted coding sessions")
   .version("1.0.0");
 
@@ -118,7 +118,7 @@ program
         if (doConfig) {
           const detected = detectProject(process.cwd());
           if (detected) {
-            const projectMemoryDir = path.join(detected.projectRoot, ".pensive");
+            const projectMemoryDir = path.join(detected.projectRoot, ".pensieve");
             await runConfigPrompt(projectMemoryDir);
           }
         }
@@ -152,18 +152,18 @@ program
     try {
       const detected = detectProject(process.cwd());
       if (!detected) {
-        cerr("No pensive project found. Run: pensive init");
+        cerr("No pensieve project found. Run: pensieve init");
         process.exit(1);
       }
 
       const projectMemoryDir = path.join(
         detected.projectRoot,
-        ".pensive"
+        ".pensieve"
       );
       const configPath = path.join(projectMemoryDir, "config.json");
 
       if (!fs.existsSync(configPath)) {
-        cerr("Not initialized. Run: pensive init");
+        cerr("Not initialized. Run: pensieve init");
         process.exit(1);
       }
 
@@ -187,15 +187,15 @@ program
   .action(async () => {
     const detected = detectProject(process.cwd());
     if (!detected) {
-      console.log("No pensive project found. Run: pensive init");
+      console.log("No pensieve project found. Run: pensieve init");
       return;
     }
 
-    const projectMemoryDir = path.join(detected.projectRoot, ".pensive");
+    const projectMemoryDir = path.join(detected.projectRoot, ".pensieve");
     const configPath = path.join(projectMemoryDir, "config.json");
 
     if (!fs.existsSync(configPath)) {
-      console.log("Not initialized. Run: pensive init");
+      console.log("Not initialized. Run: pensieve init");
       return;
     }
 
@@ -241,9 +241,9 @@ program
   .option("--file <path>", "Find turns and memories from sessions that referenced this file")
   .action(async (query: string | undefined, opts) => {
     const detected = detectProject(process.cwd());
-    if (!detected) { cerr("No pensive project found. Run: pensive init"); process.exit(1); }
+    if (!detected) { cerr("No pensieve project found. Run: pensieve init"); process.exit(1); }
 
-    const projectMemoryDir = path.join(detected.projectRoot, ".pensive");
+    const projectMemoryDir = path.join(detected.projectRoot, ".pensieve");
     const config = readProjectConfig(projectMemoryDir);
     const { conn } = getDb(projectMemoryDir);
     await applySchema(conn, projectMemoryDir);
@@ -347,9 +347,9 @@ program
   .description("Generate and store embeddings for all nodes missing them (Memory, Task, Session, Turn)")
   .action(async () => {
     const detected = detectProject(process.cwd());
-    if (!detected) { cerr("No pensive project found. Run: pensive init"); process.exit(1); }
+    if (!detected) { cerr("No pensieve project found. Run: pensieve init"); process.exit(1); }
 
-    const projectMemoryDir = path.join(detected.projectRoot, ".pensive");
+    const projectMemoryDir = path.join(detected.projectRoot, ".pensieve");
     const config = readProjectConfig(projectMemoryDir);
     const { conn } = getDb(projectMemoryDir);
     await applySchema(conn, projectMemoryDir);
@@ -448,15 +448,15 @@ program
 
     const detected = detectProject(process.cwd());
     if (!detected) {
-      cerr("No pensive project found. Run: pensive init");
+      cerr("No pensieve project found. Run: pensieve init");
       process.exit(1);
     }
 
-    const projectMemoryDir = path.join(detected.projectRoot, ".pensive");
+    const projectMemoryDir = path.join(detected.projectRoot, ".pensieve");
     const configPath = path.join(projectMemoryDir, "config.json");
 
     if (!fs.existsSync(configPath)) {
-      cerr("Not initialized. Run: pensive init");
+      cerr("Not initialized. Run: pensieve init");
       process.exit(1);
     }
 
@@ -502,13 +502,13 @@ program
   .action(async (opts) => {
     const detected = detectProject(process.cwd());
     if (!detected) {
-      cerr("No pensive project found. Run: pensive init");
+      cerr("No pensieve project found. Run: pensieve init");
       process.exit(1);
     }
-    const projectMemoryDir = path.join(detected.projectRoot, ".pensive");
+    const projectMemoryDir = path.join(detected.projectRoot, ".pensieve");
     const configPath = path.join(projectMemoryDir, "config.json");
     if (!fs.existsSync(configPath)) {
-      cerr("Not initialized. Run: pensive init");
+      cerr("Not initialized. Run: pensieve init");
       process.exit(1);
     }
     const config = readProjectConfig(projectMemoryDir);
@@ -561,7 +561,7 @@ projectCmd
       console.log(`\n${chalk.bold.cyan("── Description ──────────────────────────")}`);
       console.log(description);
     } else {
-      console.log(chalk.dim("\n  No description yet. Set one with: pensive project set description \"...\""));
+      console.log(chalk.dim("\n  No description yet. Set one with: pensieve project set description \"...\""));
     }
     console.log("");
   });
@@ -587,10 +587,10 @@ projectCmd
     // Keep config.json in sync for name/remoteUrl
     if (field === "name") {
       config.projectName = value;
-      writeProjectConfig(path.join(detectProject(process.cwd())!.projectRoot, ".pensive"), config);
+      writeProjectConfig(path.join(detectProject(process.cwd())!.projectRoot, ".pensieve"), config);
     } else if (field === "remoteUrl") {
       config.remoteUrl = value;
-      writeProjectConfig(path.join(detectProject(process.cwd())!.projectRoot, ".pensive"), config);
+      writeProjectConfig(path.join(detectProject(process.cwd())!.projectRoot, ".pensieve"), config);
     }
 
     console.log(`${chalk.green("Set")} ${chalk.white(field)}: ${value}`);
@@ -601,13 +601,13 @@ projectCmd
 async function getProjectDb(cwd: string) {
   const detected = detectProject(cwd);
   if (!detected) {
-    cerr("No pensive project found. Run: pensive init");
+    cerr("No pensieve project found. Run: pensieve init");
     process.exit(1);
   }
-  const projectMemoryDir = path.join(detected.projectRoot, ".pensive");
+  const projectMemoryDir = path.join(detected.projectRoot, ".pensieve");
   const configPath = path.join(projectMemoryDir, "config.json");
   if (!fs.existsSync(configPath)) {
-    cerr("Not initialized. Run: pensive init");
+    cerr("Not initialized. Run: pensieve init");
     process.exit(1);
   }
   const config = readProjectConfig(projectMemoryDir);
@@ -669,7 +669,7 @@ function printTaskList(
   subtasks: Record<string, unknown>[] = []
 ): void {
   if (!active && pending.length === 0 && blocked.length === 0 && done.length === 0) {
-    console.log("No tasks. Add one: pensive tasks add \"title\"");
+    console.log("No tasks. Add one: pensieve tasks add \"title\"");
     return;
   }
 
@@ -790,7 +790,7 @@ tasksCmd
         parentTask = all.find((t) => shortId(String(t["id"])).startsWith(opts.parent!));
       }
       if (!parentTask) {
-        cerr(`No task matching "${opts.parent}". Run: pensive tasks`);
+        cerr(`No task matching "${opts.parent}". Run: pensieve tasks`);
         process.exit(1);
       }
       parentId = String(parentTask["id"]);
@@ -862,7 +862,7 @@ tasksCmd
     }
 
     if (!targetId) {
-      cerr(`No task matching "${target}". Run: pensive tasks`);
+      cerr(`No task matching "${target}". Run: pensieve tasks`);
       process.exit(1);
     }
 
@@ -900,7 +900,7 @@ tasksCmd
     }
 
     if (!targetId) {
-      cerr(`No task matching "${target}". Run: pensive tasks`);
+      cerr(`No task matching "${target}". Run: pensieve tasks`);
       process.exit(1);
     }
 
@@ -935,7 +935,7 @@ tasksCmd
     }
 
     if (!target_id) {
-      cerr(`No pending task matching "${target}". Run: pensive tasks`);
+      cerr(`No pending task matching "${target}". Run: pensieve tasks`);
       process.exit(1);
     }
 
@@ -1062,7 +1062,7 @@ tasksCmd
     }
 
     if (!targetId) {
-      cerr(`No task matching "${target}". Run: pensive tasks`);
+      cerr(`No task matching "${target}". Run: pensieve tasks`);
       process.exit(1);
     }
 
@@ -1127,7 +1127,7 @@ sessionsCmd
       const sessions = rows.map((r) => r["s"] as Record<string, unknown>);
       const match = sessions.find((s) => String(s["id"]).includes(id));
       if (!match) {
-        cerr(`No session matching "${id}". Run: pensive sessions`);
+        cerr(`No session matching "${id}". Run: pensieve sessions`);
         process.exit(1);
       }
       const sid = String(match["id"]);
@@ -1206,7 +1206,7 @@ sessionsCmd
     const sessions = rows.map((r) => r["s"] as Record<string, unknown>);
     const match = sessions.find((s) => String(s["id"]).includes(target));
     if (!match) {
-      cerr(`No session matching "${target}". Run: pensive sessions --all`);
+      cerr(`No session matching "${target}". Run: pensieve sessions --all`);
       process.exit(1);
     }
     const sid = String(match["id"]);
@@ -1247,7 +1247,7 @@ sessionsCmd
     const sessions = rows.map((r) => r["s"] as Record<string, unknown>);
     const match = sessions.find((s) => String(s["id"]).includes(target));
     if (!match) {
-      cerr(`No session matching "${target}". Run: pensive sessions`);
+      cerr(`No session matching "${target}". Run: pensieve sessions`);
       process.exit(1);
     }
     const sid = String(match["id"]);
@@ -1276,7 +1276,7 @@ memoriesCmd
       const memories = rows.map((r) => r["m"] as Record<string, unknown>);
       const match = memories.find((m) => String(m["id"]).includes(id));
       if (!match) {
-        cerr(`No memory matching "${id}". Run: pensive memories`);
+        cerr(`No memory matching "${id}". Run: pensieve memories`);
         process.exit(1);
       }
       console.log(`\n${chalk.bold.cyan("── Memory ───────────────────────────────")}`);
@@ -1329,7 +1329,7 @@ memoriesCmd
     const memories = rows.map((r) => r["m"] as Record<string, unknown>);
     const match = memories.find((m) => String(m["id"]).includes(id));
     if (!match) {
-      cerr(`No memory matching "${id}". Run: pensive memories`);
+      cerr(`No memory matching "${id}". Run: pensieve memories`);
       process.exit(1);
     }
     const mid = String(match["id"]);
@@ -1593,7 +1593,7 @@ program
     const activeRows = await queryAll(conn, `MATCH (t:Task {projectId: '${pid}', status: 'active'}) RETURN t LIMIT 1`);
     const activeTask = activeRows[0]?.["t"] as Record<string, unknown> | undefined;
 
-    console.log(chalk.bold.cyan(`\n── Pensive Chat ─────────────────────────`));
+    console.log(chalk.bold.cyan(`\n── pensieve Chat ─────────────────────────`));
     console.log(`  Project: ${chalk.white(config.projectName)}`);
     console.log(`  Model:   ${chalk.dim(config.llm?.model ?? "not set")}`);
     if (activeTask) console.log(`  Task:    ${chalk.dim(String(activeTask["title"]))}`);
@@ -1695,13 +1695,13 @@ program
   .description("Run a Claude Code hook (reads JSON payload from stdin)")
   .action((type: string | undefined) => {
     if (!type) {
-      console.log(`${chalk.bold("Usage:")} pensive hook <type>\n`);
+      console.log(`${chalk.bold("Usage:")} pensieve hook <type>\n`);
       console.log(chalk.bold("Available hook types:"));
       for (const [name, script] of Object.entries(HOOK_SCRIPTS)) {
         console.log(`  ${chalk.white(name.padEnd(16))} ${chalk.dim("(" + script + ")")}`);
       }
       console.log(chalk.dim("\nThese are registered automatically in .claude/settings.json and .github/settings.json"));
-      console.log(chalk.dim("by running: pensive init"));
+      console.log(chalk.dim("by running: pensieve init"));
       process.exit(0);
     }
     const script = HOOK_SCRIPTS[type];

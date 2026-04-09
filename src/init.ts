@@ -10,7 +10,7 @@ export async function initProject(cwd: string): Promise<boolean> {
   const projectRoot = cwd;
   const { remoteUrl, projectName } = resolveProjectIdentity(projectRoot);
   const repoRoot = projectRoot;
-  const projectMemoryDir = path.join(projectRoot, ".pensive");
+  const projectMemoryDir = path.join(projectRoot, ".pensieve");
   const configPath = path.join(projectMemoryDir, "config.json");
 
   // Idempotent — check if already initialized
@@ -61,14 +61,14 @@ export async function initProject(cwd: string): Promise<boolean> {
     })`
   );
 
-  // Add .pensive to .gitignore only if this is a git repo
+  // Add .pensieve to .gitignore only if this is a git repo
   const gitDir = path.join(repoRoot, ".git");
   if (fs.existsSync(gitDir)) {
     const gitignorePath = path.join(repoRoot, ".gitignore");
-    const entry = ".pensive/\n";
+    const entry = ".pensieve/\n";
     if (fs.existsSync(gitignorePath)) {
       const contents = fs.readFileSync(gitignorePath, "utf-8");
-      if (!contents.includes(".pensive")) fs.appendFileSync(gitignorePath, `\n${entry}`);
+      if (!contents.includes(".pensieve")) fs.appendFileSync(gitignorePath, `\n${entry}`);
     } else {
       fs.writeFileSync(gitignorePath, entry);
     }
@@ -82,8 +82,8 @@ export async function initProject(cwd: string): Promise<boolean> {
   console.log(`  ID:     ${projectId}`);
   if (remoteUrl) console.log(`  Remote: ${remoteUrl}`);
   console.log(`  Path:   ${projectMemoryDir}`);
-  console.log(`  Hooks:  .claude/settings.json, .github/hooks/pensive.json`);
-  console.log(`  Run "pensive config" to set your LLM and embedding models.`);
+  console.log(`  Hooks:  .claude/settings.json, .github/hooks/pensieve.json`);
+  console.log(`  Run "pensieve config" to set your LLM and embedding models.`);
 
   return true;
 }
@@ -110,7 +110,7 @@ function writeClaudeSettings(projectRoot: string): void {
   const hooks = (existing["hooks"] as Record<string, unknown[]> | undefined) ?? {};
 
   for (const [event, type] of HOOK_EVENTS) {
-    const cmd = `pensive hook ${type}`;
+    const cmd = `pensieve hook ${type}`;
     const entries = (hooks[event] as Array<Record<string, unknown>> | undefined) ?? [];
     const alreadyPresent = entries.some((e) => {
       const inner = e["hooks"] as Array<Record<string, unknown>> | undefined;
@@ -126,21 +126,21 @@ function writeClaudeSettings(projectRoot: string): void {
   fs.writeFileSync(settingsPath, JSON.stringify(existing, null, 2));
 }
 
-/** .github/hooks/pensive.json — flat format */
+/** .github/hooks/pensieve.json — flat format */
 function writeGithubHooks(projectRoot: string): void {
   const hooksDir = path.join(projectRoot, ".github", "hooks");
-  const pensivePath = path.join(hooksDir, "pensive.json");
+  const pensievePath = path.join(hooksDir, "pensieve.json");
   fs.mkdirSync(hooksDir, { recursive: true });
 
   let existing: Record<string, unknown> = {};
-  if (fs.existsSync(pensivePath)) {
-    try { existing = JSON.parse(fs.readFileSync(pensivePath, "utf-8")); } catch { /* ignore */ }
+  if (fs.existsSync(pensievePath)) {
+    try { existing = JSON.parse(fs.readFileSync(pensievePath, "utf-8")); } catch { /* ignore */ }
   }
 
   const hooks = (existing["hooks"] as Record<string, unknown[]> | undefined) ?? {};
 
   for (const [event, type] of HOOK_EVENTS) {
-    const cmd = `pensive hook ${type}`;
+    const cmd = `pensieve hook ${type}`;
     const entries = (hooks[event] as Array<Record<string, string>> | undefined) ?? [];
     const alreadyPresent = entries.some((e) => e["command"] === cmd);
     if (!alreadyPresent) {
@@ -150,5 +150,5 @@ function writeGithubHooks(projectRoot: string): void {
   }
 
   existing["hooks"] = hooks;
-  fs.writeFileSync(pensivePath, JSON.stringify(existing, null, 2));
+  fs.writeFileSync(pensievePath, JSON.stringify(existing, null, 2));
 }

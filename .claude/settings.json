@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pensive hook session-start"
+            "command": "pensieve hook session-start"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pensive hook user-prompt"
+            "command": "pensieve hook user-prompt"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pensive hook stop"
+            "command": "pensieve hook stop"
           }
         ]
       }
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pensive hook compact"
+            "command": "pensieve hook compact"
           }
         ]
       }
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pensive hook post-tool-use"
+            "command": "pensieve hook post-tool-use"
           }
         ]
       }

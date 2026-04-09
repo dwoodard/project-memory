@@ -1,10 +1,10 @@
 {
-  "name": "pensive",
+  "name": "pensieve",
   "version": "1.0.0",
   "description": "Deterministic memory system for AI-assisted coding sessions",
   "main": "dist/index.js",
   "bin": {
-    "pensive": "./dist/cli.js"
+    "pensieve": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
@@ -12,7 +12,7 @@
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js --help",
     "explore": "node dist/cli.js explore",
-    "help": "echo '\npensive workflow:\n  1. npm run build          — compile TypeScript\n  2. npm link               — install pensive CLI globally\n  3. cd <your-repo>         — go to any git repo\n  4. pensive init    — initialize memory for that repo\n  5. pensive status  — check project info\n  6. pensive explore — open Kuzu graph explorer (requires Docker)\n  7. pensive context — show current context bundle\n'"
+    "help": "echo '\npensieve workflow:\n  1. npm run build          — compile TypeScript\n  2. npm link               — install pensieve CLI globally\n  3. cd <your-repo>         — go to any git repo\n  4. pensieve init    — initialize memory for that repo\n  5. pensieve status  — check project info\n  6. pensieve explore — open Kuzu graph explorer (requires Docker)\n  7. pensieve context — show current context bundle\n'"
   },
   "keywords": [],
   "author": "",

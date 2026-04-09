@@ -13,17 +13,17 @@ import type { Turn } from "./types.js";
 export async function ingestTurn(turn: Turn): Promise<void> {
   const detected = detectProject(turn.cwd);
   if (!detected) {
-    console.error("No pensive project found at:", turn.cwd);
+    console.error("No pensieve project found at:", turn.cwd);
     return;
   }
 
   const { projectRoot } = detected;
-  const projectMemoryDir = path.join(projectRoot, ".pensive");
+  const projectMemoryDir = path.join(projectRoot, ".pensieve");
   let config;
   try {
     config = readProjectConfig(projectMemoryDir);
   } catch {
-    console.error("Project not initialized. Run: pensive init");
+    console.error("Project not initialized. Run: pensieve init");
     return;
   }
   const { conn } = getDb(projectMemoryDir);

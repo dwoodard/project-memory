@@ -31,13 +31,13 @@ A memory is only kept if it is useful later without rereading the chat, or it he
 
 - Kuzu is an embeddable graph DB with native vector search
 - No server required — files live on disk
-- Sits inside `.pensive/` in each repo
+- Sits inside `.pensieve/` in each repo
 - Gives Cypher-style graph traversal + semantic vector search
 
 ### Init: Explicit CLI command
 
 ```
-pensive init
+pensieve init
 ```
 
 Runs once per repo. Sets up everything needed.
@@ -45,7 +45,7 @@ Runs once per repo. Sets up everything needed.
 ### Per-project structure
 
 ```
-.pensive/
+.pensieve/
   config.json         # project identity
   kuzu/               # Kuzu DB files
   sessions/           # raw session logs (noisy, not queried by AI)
@@ -57,14 +57,14 @@ Runs once per repo. Sets up everything needed.
 
 ---
 
-## What `pensive init` Does
+## What `pensieve init` Does
 
 1. Detect git repo root
-2. Create `.pensive/`
+2. Create `.pensieve/`
 3. Initialize Kuzu DB and apply schema
 4. Write `config.json` with project identity
 5. Create the first `Project` node in the DB
-6. Add `.pensive/` to `.gitignore`
+6. Add `.pensieve/` to `.gitignore`
 
 Must be safely re-runnable (idempotent — detect existing setup and skip).
 
@@ -136,7 +136,7 @@ Fallback: if no remote exists, use repo directory name + a generated UUID stored
   "type": "design_doc",
   "title": "...",
   "summary": "...",
-  "location": ".pensive/artifacts/art_001.md",
+  "location": ".pensieve/artifacts/art_001.md",
   "createdAt": "...",
   "embedding_id": "..."
 }
@@ -288,7 +288,7 @@ The system infers mode from the active task state:
 {
   "id": "mem_001",
   "kind": "task",
-  "title": "Implement pensive init",
+  "title": "Implement pensieve init",
   "summary": "...",
   "status": "active",
   "projectId": "...",
@@ -351,16 +351,16 @@ Core tools:
 ### Core
 
 ```
-pensive init
-pensive ingest-turn --input <file>
+pensieve init
+pensieve ingest-turn --input <file>
 ```
 
 ### Optional (later)
 
 ```
-pensive sync
-pensive recall
-pensive status
+pensieve sync
+pensieve recall
+pensieve status
 ```
 
 ---
@@ -369,7 +369,7 @@ pensive status
 
 The first integration point is a Claude Code post-turn hook that:
 1. Captures the completed turn as a JSON file
-2. Calls `pensive ingest-turn --input <file>`
+2. Calls `pensieve ingest-turn --input <file>`
 
 Why Claude Code first:
 - deterministic (hook always fires)
@@ -382,7 +382,7 @@ Why Claude Code first:
 ## Tool Structure
 
 ```
-pensive/
+pensieve/
   src/
     index.ts            # entry point, orchestrates pipeline
     detect-project.ts   # find repo root, resolve project identity
@@ -406,7 +406,7 @@ pensive/
 **NEVER:**
 - Raw session logs
 - Candidate files
-- Local `.pensive/` files directly
+- Local `.pensieve/` files directly
 
 ---
 
@@ -419,8 +419,9 @@ pensive/
 - [ ] Define Claude Code hook payload format
 
 ### Implementation order
+
 - [ ] Implement CLI skeleton
-- [ ] Implement `pensive init`
+- [ ] Implement `pensieve init`
 - [ ] Implement `detect-project.ts`
 - [ ] Implement Kuzu schema + migrations
 - [ ] Implement `append-turn.ts`

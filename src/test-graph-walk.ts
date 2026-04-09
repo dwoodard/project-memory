@@ -59,7 +59,7 @@ function assert(condition: boolean, label: string): void {
 
 // ── DB setup ─────────────────────────────────────────────────────────────────
 async function makeDb() {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pensive-test-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pensieve-test-"));
   const dbPath = path.join(tmpDir, "test.kz");
   const db = new kuzu.Database(dbPath);
   const conn = new kuzu.Connection(db);
@@ -241,7 +241,7 @@ async function testRecencyDecay() {
 
 // ── Run ───────────────────────────────────────────────────────────────────────
 (async () => {
-  console.log("pensive graph-walk tests\n");
+  console.log("pensieve graph-walk tests\n");
   try {
     await testCosineSimilarity();
     await testGraphWalkRetrieval();

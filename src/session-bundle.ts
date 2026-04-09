@@ -1,7 +1,7 @@
 /**
  * Shared session-start bundle logic used by both:
  *  - hook-session-start.ts  (automatic, injected before first user message)
- *  - pensive context        (manual verification command)
+ *  - pensieve context        (manual verification command)
  */
 
 import { queryAll, escape } from "./kuzu-helpers.js";
@@ -47,17 +47,17 @@ export function buildBundle(
     remaining -= safe.length + 1;
   };
 
-  push(`## pensive CLI`);
-  push(`pensive tasks              — list tasks (gantt view)`);
-  push(`pensive tasks start <n>    — set task active by queue position`);
-  push(`pensive tasks done         — complete the active task`);
-  push(`pensive tasks add "title"  — add a task to the queue`);
-  push(`pensive tasks block "why"   — mark active task blocked`);
-  push(`pensive tasks remove <n>   — delete a task by position or id`);
-  push(`pensive tasks move <f> <t> — reorder queue`);
-  push(`pensive context            — show full memory context`);
-  push(`pensive status             — show memory stats`);
-  push(`pensive search "<query>"  — pull relevant memories on demand`);
+  push(`## pensieve CLI`);
+  push(`pensieve tasks              — list tasks (gantt view)`);
+  push(`pensieve tasks start <n>    — set task active by queue position`);
+  push(`pensieve tasks done         — complete the active task`);
+  push(`pensieve tasks add "title"  — add a task to the queue`);
+  push(`pensieve tasks block "why"   — mark active task blocked`);
+  push(`pensieve tasks remove <n>   — delete a task by position or id`);
+  push(`pensieve tasks move <f> <t> — reorder queue`);
+  push(`pensieve context            — show full memory context`);
+  push(`pensieve status             — show memory stats`);
+  push(`pensieve search "<query>"  — pull relevant memories on demand`);
   push("");
 
   if (projectDescription) {
@@ -95,7 +95,7 @@ export function buildBundle(
         if (t.summary) push(`     ${truncate(t.summary, 80)}`);
       });
     }
-    push(`Work the active task. When done run: pensive tasks done`);
+    push(`Work the active task. When done run: pensieve tasks done`);
     push("");
   }
 
