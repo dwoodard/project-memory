@@ -251,7 +251,7 @@ program
 program
   .command("search <query>")
   .description("Semantic search across memories, tasks, and sessions")
-  .option("-k, --top <n>", "Number of results", "5")
+  .option("-k, --top <n>", "Number of results", "10")
   .action(async (query: string, opts) => {
     const detected = detectProject(process.cwd());
     if (!detected) { cerr("No pensive project found. Run: pensive init"); process.exit(1); }
