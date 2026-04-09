@@ -112,7 +112,7 @@ export async function searchAll(
     ...sessionRows.map((r) => {
       const s = r["s"] as Session & { embedding: number[] };
       return {
-        nodeType: "session" as const, id: s.id, title: s.title, summary: s.summary,
+        nodeType: "session" as const, id: s.id, title: (s.title ?? s.summary ?? "Untitled Session").slice(0, 80), summary: s.summary,
         projectId: s.projectId, score: cosineSimilarity(queryVec, s.embedding),
         startedAt: s.startedAt,
       };
