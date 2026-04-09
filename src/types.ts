@@ -49,6 +49,7 @@ export interface Task {
   createdAt: string;
   parentId?: string;
   completedAt?: string;
+  completionNote?: string;
   embedding?: number[];
 }
 

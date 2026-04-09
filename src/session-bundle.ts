@@ -95,7 +95,7 @@ export function buildBundle(
         if (t.summary) push(`     ${truncate(t.summary, 80)}`);
       });
     }
-    push(`Work the active task. When done run: pensieve tasks done`);
+    push(`Work the active task. When done run: pensieve tasks done --note "brief summary of what you accomplished"`);
     push("");
   }
 
@@ -104,6 +104,7 @@ export function buildBundle(
     recentlyDone.forEach((t) => {
       const date = t.completedAt ? ` (${formatDate(t.completedAt)})` : "";
       push(`  ✓ [${shortId(t.id)}] ${t.title}${date}`);
+      if (t.completionNote) push(`      "${truncate(t.completionNote, 100)}"`);
     });
     push("");
   }

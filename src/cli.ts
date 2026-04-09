@@ -959,10 +959,12 @@ tasksCmd
 tasksCmd
   .command("done [targets...]")
   .description("Mark tasks as done — active task if no args, or by id prefix/queue position")
-  .action(async (targets: string[]) => {
+  .option("-n, --note <text>", "brief summary of what was accomplished")
+  .action(async (targets: string[], opts: { note?: string }) => {
     const { config, conn } = await getProjectDb(process.cwd());
     const pid = config.projectId;
     const { escape: esc } = await import("./kuzu-helpers.js");
+    const note = opts.note ?? "";
 
     if (targets.length === 0) {
       const rows = await queryAll(conn,
@@ -970,8 +972,9 @@ tasksCmd
          RETURN m LIMIT 1`);
       if (rows.length === 0) { console.log(chalk.dim("No active task.")); return; }
       const task = rows[0]["m"] as Record<string, unknown>;
-      await conn.query(`MATCH (m:Task {id: '${esc(String(task["id"]))}' }) SET m.status = 'done', m.completedAt = '${new Date().toISOString()}'`);
+      await conn.query(`MATCH (m:Task {id: '${esc(String(task["id"]))}' }) SET m.status = 'done', m.completedAt = '${new Date().toISOString()}', m.completionNote = '${esc(note)}'`);
       console.log(`${chalk.green("Done:")} ${task["title"]}`);
+      if (note) console.log(chalk.dim(`  "${note}"`));
       return;
     }
 
@@ -990,8 +993,9 @@ tasksCmd
         task = all.find((t) => shortId(String(t["id"])).startsWith(target));
       }
       if (!task) { cerr(`No task matching "${target}"`); continue; }
-      await conn.query(`MATCH (m:Task {id: '${esc(String(task["id"]))}' }) SET m.status = 'done', m.completedAt = '${new Date().toISOString()}'`);
+      await conn.query(`MATCH (m:Task {id: '${esc(String(task["id"]))}' }) SET m.status = 'done', m.completedAt = '${new Date().toISOString()}', m.completionNote = '${esc(note)}'`);
       console.log(`${chalk.green("Done:")} ${task["title"]}`);
+      if (note) console.log(chalk.dim(`  "${note}"`));
     }
   });
 
