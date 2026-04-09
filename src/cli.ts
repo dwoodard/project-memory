@@ -17,8 +17,9 @@ import {
   PROVIDER_DEFAULTS,
   type ProjectConfig,
 } from "./config.js";
-import { embed } from "./llm.js";
-import { searchMemories } from "./search.js";
+import { embed, llmChatMessages } from "./llm.js";
+import type { ChatMessage, ToolDefinition } from "./llm.js";
+import { searchMemories, searchMemoriesWithGraph } from "./search.js";
 import type { Turn } from "./types.js";
 
 const cerr = (msg: string) => console.error(chalk.red(msg));
@@ -1260,6 +1261,256 @@ memoriesCmd
     const mid = String(match["id"]);
     await conn.query(`MATCH (m:Memory {id: '${esc(mid)}'}) DETACH DELETE m`);
     console.log(`${chalk.red("Removed")} memory ${chalk.dim(mid.slice(0, 8))}: ${chalk.white(String(match["title"]))}`);
+  });
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+
+program
+  .command("chat")
+  .description("Interactive chat with your project memories as context")
+  .option("-k, --top <n>", "Number of memories to surface per message", "5")
+  .action(async (opts) => {
+    const { config, conn } = await getProjectDb(process.cwd());
+    const pid = config.projectId;
+    const { escape: esc } = await import("./kuzu-helpers.js");
+    const { default: crypto } = await import("crypto");
+
+    const topK = parseInt(opts.top ?? "5", 10);
+
+    // ── Tool definitions ──────────────────────────────────────────────────────
+    const TOOLS: ToolDefinition[] = [
+      {
+        type: "function",
+        function: {
+          name: "search_memories",
+          description: "Search the project memory graph for information related to a query. Use this to find relevant decisions, facts, tasks, and other memories.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "The search query" },
+              top_k: { type: "string", description: "Number of results to return (default 5)" },
+            },
+            required: ["query"],
+          },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "list_tasks",
+          description: "List the current tasks for this project (active, queued, blocked, recently done).",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "add_task",
+          description: "Add a new task to the project queue.",
+          parameters: {
+            type: "object",
+            properties: {
+              title: { type: "string", description: "Task title" },
+              summary: { type: "string", description: "Optional task summary/details" },
+            },
+            required: ["title"],
+          },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "set_task_summary",
+          description: "Set or update the summary/details for a task by its title or id prefix.",
+          parameters: {
+            type: "object",
+            properties: {
+              target: { type: "string", description: "Task title substring or id prefix" },
+              summary: { type: "string", description: "New summary text" },
+            },
+            required: ["target", "summary"],
+          },
+        },
+      },
+    ];
+
+    // ── Tool executor ─────────────────────────────────────────────────────────
+    async function executeTool(name: string, args: Record<string, string>): Promise<string> {
+      if (name === "search_memories") {
+        const k = parseInt(args["top_k"] ?? String(topK), 10);
+        const results = await searchMemoriesWithGraph(conn, pid, args["query"] ?? "", k);
+        if (results.length === 0) return "No memories found.";
+        return results
+          .map((m) => `[${m.kind.toUpperCase()}] ${m.title}\n${m.summary}`)
+          .join("\n\n");
+      }
+
+      if (name === "list_tasks") {
+        const activeR = await queryAll(conn, `MATCH (t:Task {projectId: '${pid}', status: 'active'}) WHERE t.parentId = '' OR t.parentId IS NULL RETURN t LIMIT 1`);
+        const pendingR = await queryAll(conn, `MATCH (t:Task {projectId: '${pid}', status: 'pending'}) WHERE t.parentId = '' OR t.parentId IS NULL RETURN t ORDER BY t.taskOrder ASC`);
+        const blockedR = await queryAll(conn, `MATCH (t:Task {projectId: '${pid}', status: 'blocked'}) WHERE t.parentId = '' OR t.parentId IS NULL RETURN t ORDER BY t.createdAt DESC`);
+        const doneR = await queryAll(conn, `MATCH (t:Task {projectId: '${pid}', status: 'done'}) WHERE t.parentId = '' OR t.parentId IS NULL RETURN t ORDER BY t.createdAt DESC LIMIT 5`);
+
+        const lines: string[] = [];
+        const active = activeR[0]?.["t"] as Record<string, unknown> | undefined;
+        if (active) lines.push(`ACTIVE: ${active["title"]}${active["summary"] ? " — " + active["summary"] : ""}`);
+        if (pendingR.length > 0) {
+          lines.push("QUEUE:");
+          pendingR.forEach((r, i) => {
+            const t = r["t"] as Record<string, unknown>;
+            lines.push(`  ${i + 1}. ${t["title"]}${t["summary"] ? " — " + t["summary"] : ""}`);
+          });
+        }
+        if (blockedR.length > 0) {
+          lines.push("BLOCKED:");
+          blockedR.forEach((r) => {
+            const t = r["t"] as Record<string, unknown>;
+            lines.push(`  ✗ ${t["title"]}`);
+          });
+        }
+        if (doneR.length > 0) {
+          lines.push("RECENTLY DONE:");
+          doneR.forEach((r) => { const t = r["t"] as Record<string, unknown>; lines.push(`  ✓ ${t["title"]}`); });
+        }
+        return lines.length > 0 ? lines.join("\n") : "No tasks.";
+      }
+
+      if (name === "add_task") {
+        const title = args["title"];
+        if (!title) return "Error: title is required.";
+        const orderR = await queryAll(conn, `MATCH (t:Task {projectId: '${pid}', status: 'pending'}) RETURN max(t.taskOrder) AS maxOrder`);
+        const maxOrder = Number(orderR[0]?.["maxOrder"] ?? 0);
+        const id = `task_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+        const summary = args["summary"] ?? "";
+        await conn.query(
+          `CREATE (t:Task {id: '${esc(id)}', title: '${esc(title)}', summary: '${esc(summary)}', status: 'pending', taskOrder: ${maxOrder + 1}, projectId: '${esc(pid)}', createdAt: '${new Date().toISOString()}', parentId: ''})`
+        );
+        await conn.query(`MATCH (p:Project {id: '${esc(pid)}'}), (t:Task {id: '${esc(id)}'}) CREATE (p)-[:HAS_TASK]->(t)`);
+        return `Task added: "${title}" [${id.slice(5, 11)}]${summary ? "\nSummary: " + summary : ""}`;
+      }
+
+      if (name === "set_task_summary") {
+        const target = args["target"];
+        const summary = args["summary"];
+        if (!target || !summary) return "Error: target and summary are required.";
+        const allR = await queryAll(conn, `MATCH (t:Task {projectId: '${pid}'}) WHERE t.status <> 'done' RETURN t ORDER BY t.taskOrder ASC`);
+        const all = allR.map((r) => r["t"] as Record<string, unknown>);
+        const match = all.find((t) =>
+          String(t["title"]).toLowerCase().includes(target.toLowerCase()) ||
+          String(t["id"]).includes(target)
+        );
+        if (!match) return `No task matching "${target}".`;
+        await conn.query(`MATCH (t:Task {id: '${esc(String(match["id"]))}'}) SET t.summary = '${esc(summary)}'`);
+        return `Summary set for "${match["title"]}".`;
+      }
+
+      return `Unknown tool: ${name}`;
+    }
+
+    // ── UI setup ──────────────────────────────────────────────────────────────
+    const activeRows = await queryAll(conn, `MATCH (t:Task {projectId: '${pid}', status: 'active'}) RETURN t LIMIT 1`);
+    const activeTask = activeRows[0]?.["t"] as Record<string, unknown> | undefined;
+
+    console.log(chalk.bold.cyan(`\n── Pensive Chat ─────────────────────────`));
+    console.log(`  Project: ${chalk.white(config.projectName)}`);
+    console.log(`  Model:   ${chalk.dim(config.llm?.model ?? "not set")}`);
+    if (activeTask) console.log(`  Task:    ${chalk.dim(String(activeTask["title"]))}`);
+    console.log(chalk.dim("\n  Type your message. Ctrl+C or /quit to exit.\n"));
+
+    const { createInterface } = await import("readline");
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+
+    type ChatMsg = ChatMessage;
+    const history: ChatMsg[] = [];
+
+    const ask = (prompt: string): Promise<string> =>
+      new Promise((resolve, reject) => {
+        rl.question(prompt, resolve);
+        rl.once("close", () => reject(new Error("closed")));
+      });
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      let userInput: string;
+      try {
+        userInput = (await ask(chalk.bold.cyan("You: "))).trim();
+      } catch {
+        break;
+      }
+
+      if (!userInput || userInput === "/quit" || userInput === "/exit") break;
+
+      // Auto-search memories for context
+      process.stdout.write(chalk.dim("  [searching memories…]"));
+      let memoryContext = "";
+      try {
+        const found = await searchMemoriesWithGraph(conn, pid, userInput, topK);
+        process.stdout.write("\r\x1b[K");
+        if (found.length > 0) {
+          const labels = found.map((m) => `[${m.kind}] ${m.title}`);
+          console.log(chalk.dim(`  Found: ${labels.join("  ·  ")}`));
+          memoryContext = found.map((m) => `[${m.kind.toUpperCase()}] ${m.title}\n${m.summary}`).join("\n\n");
+        }
+      } catch {
+        process.stdout.write("\r\x1b[K");
+      }
+
+      // System prompt
+      const systemParts = [
+        `You are a helpful assistant for the project "${config.projectName}".`,
+        `You have tools to search memories, list tasks, add tasks, and set task summaries.`,
+        `When asked to perform an action (add a task, etc.), use the appropriate tool — do not just describe it.`,
+      ];
+      if (activeTask) systemParts.push(`\nActive task: ${activeTask["title"]}`);
+      if (memoryContext) systemParts.push(`\nRelevant memories:\n\n${memoryContext}`);
+
+      const messages: ChatMsg[] = [
+        { role: "system", content: systemParts.join("\n") },
+        ...history,
+        { role: "user", content: userInput },
+      ];
+
+      try {
+        // Agentic loop: keep running until no more tool calls
+        let iterMessages = messages;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          process.stdout.write(chalk.dim("  [thinking…]"));
+          const response = await llmChatMessages(iterMessages, TOOLS);
+          process.stdout.write("\r\x1b[K");
+
+          if (response.tool_calls && response.tool_calls.length > 0) {
+            // Execute each tool call
+            const assistantMsg: ChatMsg = { role: "assistant", content: response.content, tool_calls: response.tool_calls };
+            iterMessages = [...iterMessages, assistantMsg];
+
+            for (const call of response.tool_calls) {
+              let args: Record<string, string> = {};
+              try { args = JSON.parse(call.function.arguments); } catch { /* */ }
+              console.log(chalk.dim(`  [tool] ${call.function.name}(${Object.entries(args).map(([k, v]) => `${k}: "${v}"`).join(", ")})`));
+              const result = await executeTool(call.function.name, args);
+              console.log(chalk.dim(`  → ${result.split("\n")[0]}${result.includes("\n") ? " …" : ""}`));
+              iterMessages = [...iterMessages, { role: "tool", content: result, tool_call_id: call.id }];
+            }
+            // Loop to get final response after tool results
+            continue;
+          }
+
+          // Final response
+          const text = response.content ?? "";
+          console.log(`\n${chalk.bold.green("Assistant:")} ${text}\n`);
+          history.push({ role: "user", content: userInput });
+          history.push({ role: "assistant", content: text });
+          break;
+        }
+      } catch (err) {
+        process.stdout.write("\r\x1b[K");
+        cerr(`LLM error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    rl.close();
+    console.log(chalk.dim("\nGoodbye."));
   });
 
 // ─────────────────────────────────────────────────────────────────────────────
