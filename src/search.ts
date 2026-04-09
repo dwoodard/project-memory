@@ -26,6 +26,8 @@ export interface ScoredNode {
   // graph-walk context
   sessionTitle?: string;
   sessionSummary?: string;
+  // co-session memories surfaced alongside this result
+  breadcrumbs?: ScoredNode[];
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {
@@ -161,6 +163,8 @@ export async function searchGraph(
   const seeds = scored.slice(0, seedK);
 
   const candidates = new Map<string, ScoredNode>(seeds.map((s) => [s.id, s]));
+  // Track sibling memories per seed for breadcrumb attachment (unweighted scores)
+  const breadcrumbsBySeed = new Map<string, ScoredNode[]>();
 
   await Promise.all(seeds.map(async (seed) => {
     const rel = seed.nodeType === "memory" ? "HAS_MEMORY" : "HAS_TURN";
@@ -190,11 +194,15 @@ export async function searchGraph(
 
       for (const r of sibMemRows) {
         const m = r["m"] as Memory & { embedding: number[] };
-        if (candidates.has(m.id)) continue;
-        candidates.set(m.id, {
-          ...memoryNode(m, queryVec, recencyScore(m.createdAt) * 0.5),
+        // Track at full score for breadcrumbs (before weight reduction)
+        const fullScoreNode: ScoredNode = {
+          ...memoryNode(m, queryVec, recencyScore(m.createdAt)),
           sessionTitle: stitle, sessionSummary: ssummary,
-        });
+        };
+        if (!breadcrumbsBySeed.has(seed.id)) breadcrumbsBySeed.set(seed.id, []);
+        breadcrumbsBySeed.get(seed.id)!.push(fullScoreNode);
+        if (candidates.has(m.id)) continue;
+        candidates.set(m.id, { ...fullScoreNode, score: fullScoreNode.score * 0.5 });
       }
 
       for (const r of sibTurnRows) {
@@ -217,7 +225,20 @@ export async function searchGraph(
     }
   }));
 
-  return Array.from(candidates.values())
+  const topResults = Array.from(candidates.values())
     .sort((a, b) => b.score - a.score)
     .slice(0, topK);
+
+  const topKIds = new Set(topResults.map((r) => r.id));
+  for (const result of topResults) {
+    const crumbs = breadcrumbsBySeed.get(result.id);
+    if (crumbs && crumbs.length > 0) {
+      result.breadcrumbs = crumbs
+        .filter((c) => !topKIds.has(c.id))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3);
+    }
+  }
+
+  return topResults;
 }

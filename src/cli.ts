@@ -16,7 +16,7 @@ import {
   PROVIDER_DEFAULTS,
   type ProjectConfig,
 } from "./config.js";
-import { embed, llmChatMessages } from "./llm.js";
+import { embed, llmChatMessages, llmComplete } from "./llm.js";
 import type { ChatMessage, ToolDefinition } from "./llm.js";
 import { searchGraph } from "./search.js";
 import type { Turn } from "./types.js";
@@ -320,6 +320,10 @@ program
         console.log(`${chalk.bold.cyan("──")} ${chalk.bold("[" + (r.kind ?? "memory").toUpperCase() + "]")} ${chalk.white(r.title)}  ${chalk.dim("(score: " + r.score.toFixed(4) + ")")}`);
         if (r.summary) console.log(`   ${chalk.dim(r.summary)}`);
         if (r.sessionTitle) console.log(`   ${chalk.dim("session:")} ${r.sessionTitle}`);
+        if (r.breadcrumbs && r.breadcrumbs.length > 0) {
+          const crumbList = r.breadcrumbs.map((c) => `${(c.kind ?? "memory").toUpperCase()}: ${c.title}`).join("  ·  ");
+          console.log(`   ${chalk.dim("↳ also from this session:")} ${chalk.dim(crumbList)}`);
+        }
       } else if (r.nodeType === "task") {
         const statusColor = r.status === "active" ? chalk.green : r.status === "blocked" ? chalk.yellow : r.status === "done" ? chalk.dim : chalk.white;
         console.log(`${chalk.bold.cyan("──")} ${chalk.bold("[TASK]")} ${chalk.white(r.title)}  ${statusColor(r.status ?? "")}  ${chalk.dim("(score: " + r.score.toFixed(4) + ")")}`);
@@ -1676,6 +1680,356 @@ program
 
     rl.close();
     console.log(chalk.dim("\nGoodbye."));
+  });
+
+// ── Walk ─────────────────────────────────────────────────────────────────────
+
+program
+  .command("walk [sessionId]")
+  .description("Walk session history forward or backward from a starting point")
+  .option("-d, --direction <dir>", "forward, backward, or both", "backward")
+  .option("-n, --steps <n>", "Number of steps to walk", "3")
+  .action(async (sessionId: string | undefined, opts: { direction: string; steps: string }) => {
+    const { config, conn } = await getProjectDb(process.cwd());
+    const pid = config.projectId;
+    const { escape: esc } = await import("./kuzu-helpers.js");
+
+    const steps = Math.max(1, parseInt(opts.steps ?? "3", 10));
+    const dir = (opts.direction ?? "backward").toLowerCase();
+
+    // Fetch all sessions for project in chronological order
+    const allRows = await queryAll(conn,
+      `MATCH (p:Project {id: '${esc(pid)}'})-[:HAS_SESSION]->(s:Session)
+       RETURN s ORDER BY s.startedAt ASC`);
+    const allSessions = allRows.map((r) => r["s"] as Record<string, unknown>);
+
+    if (allSessions.length === 0) {
+      console.log(chalk.dim("No sessions found."));
+      return;
+    }
+
+    // Resolve seed session
+    let seedIdx: number;
+    if (sessionId) {
+      seedIdx = allSessions.findIndex((s) => String(s["id"]).includes(sessionId));
+      if (seedIdx === -1) {
+        cerr(`No session matching "${sessionId}". Run: pensieve sessions`);
+        process.exit(1);
+      }
+    } else {
+      seedIdx = allSessions.length - 1; // most recent
+    }
+
+    // Slice the walk range
+    let walkSessions: Array<Record<string, unknown>>;
+    if (dir === "forward") {
+      walkSessions = allSessions.slice(seedIdx, seedIdx + steps + 1);
+    } else if (dir === "both") {
+      const back = allSessions.slice(Math.max(0, seedIdx - steps), seedIdx);
+      const fwd = allSessions.slice(seedIdx + 1, seedIdx + steps + 1);
+      walkSessions = [...back, allSessions[seedIdx], ...fwd];
+    } else {
+      // backward (default): seed + N sessions before it
+      walkSessions = allSessions.slice(Math.max(0, seedIdx - steps), seedIdx + 1);
+    }
+
+    console.log(`\n${chalk.bold.cyan("── Walk")} ${chalk.dim("(" + dir + ", " + steps + " steps)")}\n`);
+
+    for (const s of walkSessions) {
+      const sid = String(s["id"]);
+      const isSeed = sid === String(allSessions[seedIdx]["id"]);
+      const ts = s["startedAt"] ? new Date(String(s["startedAt"])).toLocaleString() : "unknown";
+      const marker = isSeed ? chalk.bold.white(" ← seed") : "";
+      console.log(`${chalk.bold.cyan("──")} ${chalk.dim("[" + sessionShortId(sid) + "]")} ${chalk.white(String(s["title"] ?? "(untitled)"))}${marker}`);
+      console.log(`   ${chalk.dim(ts)}`);
+      if (s["summary"]) console.log(`   ${chalk.dim(String(s["summary"]).slice(0, 160) + (String(s["summary"]).length > 160 ? "…" : ""))}`);
+
+      const memRows = await queryAll(conn,
+        `MATCH (s:Session {id: '${esc(sid)}'})-[:HAS_MEMORY]->(m:Memory)
+         RETURN m ORDER BY m.createdAt ASC`);
+      if (memRows.length > 0) {
+        for (const r of memRows) {
+          const m = r["m"] as Record<string, unknown>;
+          console.log(`   ${chalk.dim("[" + String(m["kind"] ?? "memory").toUpperCase() + "]")} ${String(m["title"] ?? "")}`);
+        }
+      }
+      console.log();
+    }
+  });
+
+// ── Diff ─────────────────────────────────────────────────────────────────────
+
+program
+  .command("diff [sessionA] [sessionB]")
+  .description("Summarize what changed in the project's understanding between two sessions")
+  .option("--last <n>", "Diff the last N sessions (default 2)", "2")
+  .action(async (sessionA: string | undefined, sessionB: string | undefined, opts: { last: string }) => {
+    const { config, conn } = await getProjectDb(process.cwd());
+    const pid = config.projectId;
+    const { escape: esc } = await import("./kuzu-helpers.js");
+
+    const allRows = await queryAll(conn,
+      `MATCH (p:Project {id: '${esc(pid)}'})-[:HAS_SESSION]->(s:Session)
+       RETURN s ORDER BY s.startedAt ASC`);
+    const allSessions = allRows.map((r) => r["s"] as Record<string, unknown>);
+
+    if (allSessions.length < 2) {
+      cerr("Need at least 2 sessions to diff.");
+      process.exit(1);
+    }
+
+    let sA: Record<string, unknown>, sB: Record<string, unknown>;
+
+    if (sessionA && sessionB) {
+      const matchA = allSessions.find((s) => String(s["id"]).includes(sessionA));
+      const matchB = allSessions.find((s) => String(s["id"]).includes(sessionB));
+      if (!matchA) { cerr(`No session matching "${sessionA}".`); process.exit(1); }
+      if (!matchB) { cerr(`No session matching "${sessionB}".`); process.exit(1); }
+      sA = matchA;
+      sB = matchB;
+    } else {
+      const n = Math.max(2, parseInt(opts.last ?? "2", 10));
+      const slice = allSessions.slice(-n);
+      sA = slice[0];
+      sB = slice[slice.length - 1];
+    }
+
+    const fetchMemories = async (sid: string) => {
+      const rows = await queryAll(conn,
+        `MATCH (s:Session {id: '${esc(sid)}'})-[:HAS_MEMORY]->(m:Memory)
+         RETURN m ORDER BY m.createdAt ASC`);
+      return rows.map((r) => r["m"] as Record<string, unknown>);
+    };
+
+    const [memsA, memsB] = await Promise.all([
+      fetchMemories(String(sA["id"])),
+      fetchMemories(String(sB["id"])),
+    ]);
+
+    const formatMems = (mems: Array<Record<string, unknown>>) =>
+      mems.length === 0
+        ? "  (no memories)"
+        : mems.map((m) => `  [${String(m["kind"] ?? "memory").toUpperCase()}] ${String(m["title"] ?? "")} — ${String(m["summary"] ?? "").slice(0, 100)}`).join("\n");
+
+    const tsA = sA["startedAt"] ? new Date(String(sA["startedAt"])).toLocaleString() : "unknown";
+    const tsB = sB["startedAt"] ? new Date(String(sB["startedAt"])).toLocaleString() : "unknown";
+
+    // Header with raw delta
+    const added = memsB.filter((b) => !memsA.some((a) => String(a["id"]) === String(b["id"]))).length;
+    const removed = memsA.filter((a) => !memsB.some((b) => String(b["id"]) === String(a["id"]))).length;
+    console.log(`\n${chalk.bold.cyan("── Diff")}`);
+    console.log(`  ${chalk.dim("A:")} ${chalk.white(String(sA["title"] ?? "(untitled)"))}  ${chalk.dim(tsA)}`);
+    console.log(`  ${chalk.dim("B:")} ${chalk.white(String(sB["title"] ?? "(untitled)"))}  ${chalk.dim(tsB)}`);
+    console.log(`  ${chalk.dim("delta:")} ${chalk.green("+" + added)} memories  ${chalk.red("-" + removed)} memories\n`);
+
+    process.stdout.write(chalk.dim("  [generating diff…]\n"));
+
+    const prompt = `You are analyzing the evolution of a software project's knowledge base between two coding sessions.
+
+Session A: "${String(sA["title"] ?? "untitled")}" (${tsA})
+Memories from Session A:
+${formatMems(memsA)}
+
+Session B: "${String(sB["title"] ?? "untitled")}" (${tsB})
+Memories from Session B:
+${formatMems(memsB)}
+
+Summarize what changed in the project's mental model between these two sessions.
+Focus on: decisions made or revised, new facts discovered, tasks completed or added, open questions resolved or raised.
+Be concise (3-6 bullet points). Do not list every memory — synthesize the meaningful changes.`;
+
+    try {
+      const summary = await llmComplete(prompt);
+      console.log(chalk.white(summary));
+    } catch (err) {
+      cerr(`LLM error: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+    console.log();
+  });
+
+// ── Link ─────────────────────────────────────────────────────────────────────
+
+const VALID_RELATIONS = ["refines", "supersedes", "contradicts", "caused_by", "resolves"] as const;
+
+async function resolveMemoryByTitle(
+  conn: InstanceType<(typeof import("kuzu"))["default"]["Connection"]>,
+  pid: string,
+  query: string,
+  label: string
+): Promise<Record<string, unknown>> {
+  const { escape: esc } = await import("./kuzu-helpers.js");
+  // If looks like an ID prefix (hex, short), try ID match first
+  const isIdLike = /^[0-9a-f_-]{4,}$/i.test(query);
+  if (isIdLike) {
+    const rows = await queryAll(conn, `MATCH (m:Memory {projectId: '${esc(pid)}'}) RETURN m`);
+    const byId = rows.map((r) => r["m"] as Record<string, unknown>).find((m) => String(m["id"]).includes(query));
+    if (byId) return byId;
+  }
+  // Title substring search
+  const rows = await queryAll(conn,
+    `MATCH (m:Memory {projectId: '${esc(pid)}'})\
+     WHERE toLower(m.title) CONTAINS toLower('${esc(query)}')\
+     RETURN m ORDER BY m.createdAt DESC`);
+  const matches = rows.map((r) => r["m"] as Record<string, unknown>);
+  if (matches.length === 0) {
+    cerr(`No memory found for ${label}: "${query}"`);
+    process.exit(1);
+  }
+  if (matches.length === 1) return matches[0];
+  // Ambiguous — print options and exit
+  console.log(chalk.yellow(`Multiple memories match "${query}" for ${label}:`));
+  matches.slice(0, 6).forEach((m, i) => {
+    console.log(`  ${i + 1}.  [${String(m["kind"] ?? "memory").toUpperCase()}] ${chalk.white(String(m["title"] ?? ""))}  ${chalk.dim(shortId(String(m["id"])))}`);
+  });
+  cerr(`Be more specific. Re-run with a more precise title fragment.`);
+  process.exit(1);
+}
+
+program
+  .command("link <titleA> <titleB>")
+  .description("Create an explicit semantic link between two Memory nodes")
+  .option("-r, --relation <relation>", `Relation type: ${VALID_RELATIONS.join(", ")}`)
+  .option("--note <note>", "Optional note about this link")
+  .action(async (titleA: string, titleB: string, opts: { relation?: string; note?: string }) => {
+    const { config, conn } = await getProjectDb(process.cwd());
+    const pid = config.projectId;
+    const { escape: esc } = await import("./kuzu-helpers.js");
+
+    if (!opts.relation) {
+      cerr(`--relation is required. Valid values: ${VALID_RELATIONS.join(", ")}`);
+      process.exit(1);
+    }
+    if (!VALID_RELATIONS.includes(opts.relation as typeof VALID_RELATIONS[number])) {
+      cerr(`Unknown relation "${opts.relation}". Valid values: ${VALID_RELATIONS.join(", ")}`);
+      process.exit(1);
+    }
+
+    const [memA, memB] = await Promise.all([
+      resolveMemoryByTitle(conn, pid, titleA, "A"),
+      resolveMemoryByTitle(conn, pid, titleB, "B"),
+    ]);
+
+    const idA = String(memA["id"]);
+    const idB = String(memB["id"]);
+
+    if (idA === idB) {
+      cerr("Cannot link a memory to itself.");
+      process.exit(1);
+    }
+
+    // Check for duplicate
+    const existing = await queryAll(conn,
+      `MATCH (a:Memory {id: '${esc(idA)}'})-[r:LINKED]->(b:Memory {id: '${esc(idB)}'})\
+       WHERE r.relation = '${esc(opts.relation)}' RETURN r`);
+    if (existing.length > 0) {
+      cerr(`A "${opts.relation}" link already exists between these memories.`);
+      process.exit(1);
+    }
+
+    const now = new Date().toISOString();
+    const note = opts.note ?? "";
+    await conn.query(
+      `MATCH (a:Memory {id: '${esc(idA)}'}), (b:Memory {id: '${esc(idB)}'})
+       CREATE (a)-[:LINKED {relation: '${esc(opts.relation)}', createdAt: '${esc(now)}', note: '${esc(note)}', source: 'human', confidence: 1.0, sessionId: ''}]->(b)`
+    );
+
+    console.log(`${chalk.green("Linked")}  [${String(memA["kind"] ?? "memory").toUpperCase()}] ${chalk.white(String(memA["title"]))}  ${chalk.bold.cyan("─" + opts.relation + "→")}  [${String(memB["kind"] ?? "memory").toUpperCase()}] ${chalk.white(String(memB["title"]))}`);
+  });
+
+program
+  .command("links [titleFragment]")
+  .description("List explicit semantic links for a Memory node (or all recent links)")
+  .action(async (titleFragment: string | undefined) => {
+    const { config, conn } = await getProjectDb(process.cwd());
+    const pid = config.projectId;
+    const { escape: esc } = await import("./kuzu-helpers.js");
+
+    if (!titleFragment) {
+      // Show all recent links for this project
+      const rows = await queryAll(conn,
+        `MATCH (a:Memory {projectId: '${esc(pid)}'})-[r:LINKED]->(b:Memory)\
+         RETURN a, r, b ORDER BY r.createdAt DESC LIMIT 20`);
+      if (rows.length === 0) {
+        console.log(chalk.dim("No links found. Create one with: pensieve link \"<titleA>\" \"<titleB>\" --relation <relation>"));
+        return;
+      }
+      console.log(`\n${chalk.bold.cyan("── Recent Links")}\n`);
+      for (const row of rows) {
+        const a = row["a"] as Record<string, unknown>;
+        const b = row["b"] as Record<string, unknown>;
+        const r = row["r"] as Record<string, unknown>;
+        const conf = Number(r["confidence"] ?? 1);
+      const confTag = conf < 1 ? chalk.dim(` [${Math.round(conf * 100)}% confident]`) : "";
+      const srcTag = String(r["source"] ?? "human") !== "human" ? chalk.dim(` [${r["source"]}]`) : "";
+      console.log(`  [${String(a["kind"] ?? "memory").toUpperCase()}] ${chalk.white(String(a["title"]))}  ${chalk.bold.cyan("─" + String(r["relation"]) + "→")}  [${String(b["kind"] ?? "memory").toUpperCase()}] ${chalk.white(String(b["title"]))}${confTag}${srcTag}`);
+        if (r["note"]) console.log(`    ${chalk.dim(String(r["note"]))}`);
+      }
+      console.log();
+      return;
+    }
+
+    const mem = await resolveMemoryByTitle(conn, pid, titleFragment, "node");
+    const mid = String(mem["id"]);
+
+    const [outRows, inRows] = await Promise.all([
+      queryAll(conn,
+        `MATCH (a:Memory {id: '${esc(mid)}'})-[r:LINKED]->(b:Memory) RETURN r, b`),
+      queryAll(conn,
+        `MATCH (a:Memory)-[r:LINKED]->(b:Memory {id: '${esc(mid)}'}) RETURN r, a`),
+    ]);
+
+    console.log(`\n${chalk.bold.cyan("── Links for:")} ${chalk.white(String(mem["title"] ?? ""))}\n`);
+
+    if (outRows.length === 0 && inRows.length === 0) {
+      console.log(chalk.dim("  No links found."));
+      console.log();
+      return;
+    }
+
+    for (const row of outRows) {
+      const b = row["b"] as Record<string, unknown>;
+      const r = row["r"] as Record<string, unknown>;
+      const rel = String(r["relation"]);
+      const reverseLabel = rel === "contradicts" ? "↔" : "→";
+      const conf = Number(r["confidence"] ?? 1);
+      const meta = [
+        conf < 1 ? `${Math.round(conf * 100)}% confident` : "",
+        String(r["source"] ?? "human") !== "human" ? String(r["source"]) : "",
+      ].filter(Boolean).join(", ");
+      console.log(`  ${reverseLabel} ${chalk.bold.cyan(rel.padEnd(12))} [${String(b["kind"] ?? "memory").toUpperCase()}] ${chalk.white(String(b["title"] ?? ""))}${meta ? chalk.dim("  " + meta) : ""}`);
+      if (r["note"]) console.log(`    ${chalk.dim(String(r["note"]))}`);
+    }
+
+    for (const row of inRows) {
+      const a = row["a"] as Record<string, unknown>;
+      const r = row["r"] as Record<string, unknown>;
+      const rel = String(r["relation"]);
+      if (rel === "contradicts") continue; // already shown as outgoing if symmetric
+      const reverseLabel = `← ${rel} by`;
+      const conf = Number(r["confidence"] ?? 1);
+      const meta = [
+        conf < 1 ? `${Math.round(conf * 100)}% confident` : "",
+        String(r["source"] ?? "human") !== "human" ? String(r["source"]) : "",
+      ].filter(Boolean).join(", ");
+      console.log(`  ${chalk.dim(reverseLabel.padEnd(14))} [${String(a["kind"] ?? "memory").toUpperCase()}] ${chalk.white(String(a["title"] ?? ""))}${meta ? chalk.dim("  " + meta) : ""}`);
+      if (r["note"]) console.log(`    ${chalk.dim(String(r["note"]))}`);
+    }
+
+    // Show incoming contradicts separately if not already shown outgoing
+    for (const row of inRows) {
+      const a = row["a"] as Record<string, unknown>;
+      const r = row["r"] as Record<string, unknown>;
+      if (String(r["relation"]) !== "contradicts") continue;
+      const alreadyOut = outRows.some(
+        (o) => String((o["b"] as Record<string, unknown>)["id"]) === String(a["id"]) && String((o["r"] as Record<string, unknown>)["relation"]) === "contradicts"
+      );
+      if (!alreadyOut) {
+        console.log(`  ↔ ${"contradicts".padEnd(12)} [${String(a["kind"] ?? "memory").toUpperCase()}] ${chalk.white(String(a["title"] ?? ""))}`);
+      }
+    }
+
+    console.log();
   });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -73,7 +73,7 @@ export async function ingestTurn(turn: Turn): Promise<void> {
   }
 
   // 2. Append turn to session log
-  appendTurn(turn, projectMemoryDir, sessionId, conn, config.projectId);
+  const turnId = appendTurn(turn, projectMemoryDir, sessionId, conn, config.projectId);
 
   // 3. Update rolling session summary — write to file and sync to Kuzu
   const existingSummary = readSummary(projectMemoryDir, sessionId);
@@ -104,12 +104,15 @@ export async function ingestTurn(turn: Turn): Promise<void> {
   if (!userText) return;
 
   try {
-    const turnId = `turn_${sessionId.slice(0, 8)}_${Date.now()}`;
-    const candidates = await extractFromTurn(userText, assistantText, sessionId, turnId);
+    const extractTurnId = `turn_${sessionId.slice(0, 8)}_${Date.now()}`;
+    const candidates = await extractFromTurn(userText, assistantText, sessionId, extractTurnId);
     if (candidates.length === 0) return;
 
     writeCandidateFile(projectMemoryDir, candidates);
-    await promoteToDb(candidates, config.projectId, conn);
+    await promoteToDb(candidates, config.projectId, conn, {
+      turnId,
+      embeddingModel: config.embedding?.model ?? "",
+    });
   } catch {
     // Never block on extraction errors
   }

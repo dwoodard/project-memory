@@ -11,7 +11,8 @@ const RELATED_THRESHOLD = 0.82; // minimum cosine similarity to create a RELATED
 async function linkRelatedMemories(
   memory: Memory & { embedding: number[] },
   projectId: string,
-  conn: InstanceType<typeof kuzu.Connection>
+  conn: InstanceType<typeof kuzu.Connection>,
+  embeddingModel = ""
 ): Promise<void> {
   if (memory.embedding.length === 0) return;
 
@@ -30,8 +31,8 @@ async function linkRelatedMemories(
       const score = Math.round(sim * 10000) / 10000;
       await conn.query(
         `MATCH (a:Memory {id: '${escape(memory.id)}'}), (b:Memory {id: '${escape(candidate.id)}'})
-         CREATE (a)-[:RELATED_TO {score: ${score}, createdAt: '${now}'}]->(b),
-                (b)-[:RELATED_TO {score: ${score}, createdAt: '${now}'}]->(a)`
+         CREATE (a)-[:RELATED_TO {score: ${score}, createdAt: '${now}', model: '${escape(embeddingModel)}'}]->(b),
+                (b)-[:RELATED_TO {score: ${score}, createdAt: '${now}', model: '${escape(embeddingModel)}'}]->(a)`
       );
     }
   }
@@ -99,8 +100,10 @@ async function promoteTask(
 export async function promoteToDb(
   candidates: CandidateMemory[],
   projectId: string,
-  conn: InstanceType<typeof kuzu.Connection>
+  conn: InstanceType<typeof kuzu.Connection>,
+  opts: { turnId?: string; embeddingModel?: string } = {}
 ): Promise<Memory[]> {
+  const { turnId = "", embeddingModel = "" } = opts;
   const promoted: Memory[] = [];
 
   for (const c of candidates) {
@@ -162,14 +165,14 @@ export async function promoteToDb(
     if (sessionRows.length > 0) {
       await conn.query(
         `MATCH (s:Session {id: '${escape(c.sessionId)}'}), (m:Memory {id: '${escape(memory.id)}'})
-         CREATE (s)-[:HAS_MEMORY]->(m)`
+         CREATE (s)-[:HAS_MEMORY {extractedFrom: '${escape(turnId)}'}]->(m)`
       );
     }
 
     // Wire RELATED_TO edges to similar existing memories
     if (embedding.length > 0) {
       try {
-        await linkRelatedMemories({ ...memory, embedding }, projectId, conn);
+        await linkRelatedMemories({ ...memory, embedding }, projectId, conn, embeddingModel);
       } catch {
         // Never block promotion on graph wiring failures
       }

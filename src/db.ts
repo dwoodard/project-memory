@@ -117,7 +117,8 @@ export async function applySchema(
     `CREATE REL TABLE IF NOT EXISTS HAS_MEMORY(FROM Session TO Memory)`,
     `CREATE REL TABLE IF NOT EXISTS HAS_TURN(FROM Session TO Turn)`,
     `CREATE REL TABLE IF NOT EXISTS REFERENCES(FROM Turn TO File)`,
-    `CREATE REL TABLE IF NOT EXISTS RELATED_TO(FROM Memory TO Memory, score FLOAT, createdAt STRING)`,
+    `CREATE REL TABLE IF NOT EXISTS RELATED_TO(FROM Memory TO Memory, score FLOAT, createdAt STRING, model STRING)`,
+    `CREATE REL TABLE IF NOT EXISTS LINKED(FROM Memory TO Memory, relation STRING, createdAt STRING, note STRING, source STRING, confidence FLOAT, sessionId STRING)`,
   ];
 
   for (const stmt of statements) {
@@ -183,6 +184,15 @@ export async function applySchema(
   try { await conn.query(`ALTER TABLE Task ADD embedding FLOAT[] DEFAULT []`); } catch { /* exists */ }
   try { await conn.query(`ALTER TABLE Session ADD embedding FLOAT[] DEFAULT []`); } catch { /* exists */ }
 
+  // Edge property migrations
+  try { await conn.query(`ALTER TABLE HAS_TURN ADD turnIndex INT64 DEFAULT -1`); } catch { /* exists */ }
+  try { await conn.query(`ALTER TABLE REFERENCES ADD accessType STRING DEFAULT 'read'`); } catch { /* exists */ }
+  try { await conn.query(`ALTER TABLE HAS_MEMORY ADD extractedFrom STRING DEFAULT ''`); } catch { /* exists */ }
+  try { await conn.query(`ALTER TABLE RELATED_TO ADD model STRING DEFAULT ''`); } catch { /* exists */ }
+  try { await conn.query(`ALTER TABLE LINKED ADD source STRING DEFAULT 'human'`); } catch { /* exists */ }
+  try { await conn.query(`ALTER TABLE LINKED ADD confidence FLOAT DEFAULT 1.0`); } catch { /* exists */ }
+  try { await conn.query(`ALTER TABLE LINKED ADD sessionId STRING DEFAULT ''`); } catch { /* exists */ }
+
   // Migration: recreate RELATED_TO with score + createdAt properties
   try {
     const result = await conn.query(`CALL table_info('RELATED_TO') RETURN *`);
@@ -191,7 +201,7 @@ export async function applySchema(
     const hasScore = cols.some((c) => c["name"] === "score");
     if (!hasScore) {
       await conn.query(`DROP TABLE RELATED_TO`);
-      await conn.query(`CREATE REL TABLE RELATED_TO(FROM Memory TO Memory, score FLOAT, createdAt STRING)`);
+      await conn.query(`CREATE REL TABLE RELATED_TO(FROM Memory TO Memory, score FLOAT, createdAt STRING, model STRING)`);
     }
   } catch { /* table didn't exist yet — created fresh by applySchema above */ }
 
@@ -324,11 +334,17 @@ async function backfillTurns(
         })`
       );
 
-      // Wire Session → Turn
+      // Wire Session → Turn (with turnIndex = current count before this turn)
+      const cntResult = await conn.query(
+        `MATCH (s:Session {id: '${escape(sessionId)}'})-[:HAS_TURN]->(t:Turn) RETURN count(t) AS cnt`
+      );
+      const cntQr = Array.isArray(cntResult) ? cntResult[0] : cntResult;
+      const cntRows2 = await (cntQr as { getAll(): Promise<Record<string, unknown>[]> }).getAll();
+      const turnIndex = Number(cntRows2[0]?.["cnt"] ?? 0);
       await conn.query(
         `MATCH (s:Session {id: '${escape(sessionId)}'}), (t:Turn {id: '${escape(entry.turnId)}'})
          WHERE NOT EXISTS { MATCH (s)-[:HAS_TURN]->(t) }
-         CREATE (s)-[:HAS_TURN]->(t)`
+         CREATE (s)-[:HAS_TURN {turnIndex: ${turnIndex}}]->(t)`
       ).catch(() => {});
 
       // Upsert File nodes + REFERENCES edges
@@ -354,7 +370,7 @@ async function backfillTurns(
         await conn.query(
           `MATCH (t:Turn {id: '${escape(entry.turnId)}'}), (f:File {id: '${escape(fileId)}'})
            WHERE NOT EXISTS { MATCH (t)-[:REFERENCES]->(f) }
-           CREATE (t)-[:REFERENCES]->(f)`
+           CREATE (t)-[:REFERENCES {accessType: 'read'}]->(f)`
         ).catch(() => {});
       }
 

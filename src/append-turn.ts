@@ -68,9 +68,17 @@ async function upsertTurnNode(
     })`
   );
 
+  // Count existing turns to assign a stable turnIndex
+  const cntResult = await conn.query(
+    `MATCH (s:Session {id: '${escape(sessionId)}'})-[:HAS_TURN]->(t:Turn) RETURN count(t) AS cnt`
+  );
+  const cntQr = Array.isArray(cntResult) ? cntResult[0] : cntResult;
+  const cntRows = await (cntQr as { getAll(): Promise<Record<string, unknown>[]> }).getAll();
+  const turnIndex = Number(cntRows[0]?.["cnt"] ?? 0);
+
   await conn.query(
     `MATCH (s:Session {id: '${escape(sessionId)}'}), (t:Turn {id: '${escape(entry.turnId)}'})
-     CREATE (s)-[:HAS_TURN]->(t)`
+     CREATE (s)-[:HAS_TURN {turnIndex: ${turnIndex}}]->(t)`
   ).catch(() => {});
 
   for (const fp of filePaths) {
@@ -95,7 +103,7 @@ async function upsertTurnNode(
 
     await conn.query(
       `MATCH (t:Turn {id: '${escape(entry.turnId)}'}), (f:File {id: '${escape(fileId)}'})
-       CREATE (t)-[:REFERENCES]->(f)`
+       CREATE (t)-[:REFERENCES {accessType: 'read'}]->(f)`
     ).catch(() => {});
   }
 
