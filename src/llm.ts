@@ -129,14 +129,22 @@ export async function embed(text: string): Promise<number[]> {
   const base = baseUrl.replace(/\/+$/, "");
   const url = base.endsWith("/v1") ? `${base}/embeddings` : `${base}/v1/embeddings`;
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-    },
-    body: JSON.stringify({ model, input: text }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      },
+      body: JSON.stringify({ model, input: text }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) throw new Error(`Embedding request failed (${res.status}): ${await res.text()}`);
   const json = await res.json() as EmbeddingResponse;

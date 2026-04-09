@@ -66,7 +66,7 @@ async function main(): Promise<void> {
     writeCandidateFile(projectMemoryDir, candidates);
 
     // Promote directly to DB — user's own words are high confidence
-    const { conn } = getDb(projectMemoryDir);
+    const { conn } = await getDb(projectMemoryDir);
     const promoted = await promoteToDb(candidates, config.projectId, conn);
 
     // promoted memories are persisted to Kuzu; no additional logging needed

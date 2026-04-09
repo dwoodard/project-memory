@@ -18,7 +18,7 @@ import {
 } from "./config.js";
 import { embed, llmChatMessages } from "./llm.js";
 import type { ChatMessage, ToolDefinition } from "./llm.js";
-import { searchAll, searchGraph } from "./search.js";
+import { searchGraph } from "./search.js";
 import type { Turn } from "./types.js";
 
 const cerr = (msg: string) => console.error(chalk.red(msg));
@@ -170,10 +170,10 @@ program
       const config: ProjectConfig = JSON.parse(
         fs.readFileSync(configPath, "utf-8")
       );
-      const { conn } = getDb(projectMemoryDir);
+      const { conn } = await getDb(projectMemoryDir);
 
       const { querySessionBundle } = await import("./session-bundle.js");
-      const output = await querySessionBundle(conn, config.projectId);
+      const output = await querySessionBundle(conn, config.projectId, "", { includeMemories: true });
       console.log(output);
     } catch (err) {
       console.error(chalk.red("Context failed:"), err instanceof Error ? err.message : err);
@@ -209,7 +209,7 @@ program
     console.log(`  Embedding: ${config.embedding?.provider ?? "not set"} / ${config.embedding?.model ?? "not set"}`);
 
     try {
-      const { conn } = getDb(projectMemoryDir);
+      const { conn } = await getDb(projectMemoryDir);
 
       const pid = config.projectId;
       const kindRows = await queryAll(conn, `MATCH (m:Memory {projectId: '${pid}'}) RETURN m.kind AS kind, count(m) AS cnt`);
@@ -245,7 +245,7 @@ program
 
     const projectMemoryDir = path.join(detected.projectRoot, ".pensieve");
     const config = readProjectConfig(projectMemoryDir);
-    const { conn } = getDb(projectMemoryDir);
+    const { conn } = await getDb(projectMemoryDir);
     await applySchema(conn, projectMemoryDir);
     const pid = config.projectId;
 
@@ -306,7 +306,7 @@ program
 
     // ── normal semantic search ────────────────────────────────────────────────
     const topK = parseInt(opts.top ?? "10", 10);
-    const results = await searchAll(conn, pid, query!, topK);
+    const results = await searchGraph(conn, pid, query!, topK);
 
     if (results.length === 0) {
       console.log(chalk.dim("No results found."));
@@ -319,13 +319,7 @@ program
       if (r.nodeType === "memory") {
         console.log(`${chalk.bold.cyan("──")} ${chalk.bold("[" + (r.kind ?? "memory").toUpperCase() + "]")} ${chalk.white(r.title)}  ${chalk.dim("(score: " + r.score.toFixed(4) + ")")}`);
         if (r.summary) console.log(`   ${chalk.dim(r.summary)}`);
-        if (r.sessionId) {
-          const sessRows = await queryAll(conn,
-            `MATCH (s:Session)-[:HAS_MEMORY]->(m:Memory {id: '${r.id}'})
-             RETURN s.title AS title`
-          );
-          if (sessRows.length > 0) console.log(`   ${chalk.dim("session:")} ${sessRows[0]["title"] ?? ""}`);
-        }
+        if (r.sessionTitle) console.log(`   ${chalk.dim("session:")} ${r.sessionTitle}`);
       } else if (r.nodeType === "task") {
         const statusColor = r.status === "active" ? chalk.green : r.status === "blocked" ? chalk.yellow : r.status === "done" ? chalk.dim : chalk.white;
         console.log(`${chalk.bold.cyan("──")} ${chalk.bold("[TASK]")} ${chalk.white(r.title)}  ${statusColor(r.status ?? "")}  ${chalk.dim("(score: " + r.score.toFixed(4) + ")")}`);
@@ -351,7 +345,7 @@ program
 
     const projectMemoryDir = path.join(detected.projectRoot, ".pensieve");
     const config = readProjectConfig(projectMemoryDir);
-    const { conn } = getDb(projectMemoryDir);
+    const { conn } = await getDb(projectMemoryDir);
     await applySchema(conn, projectMemoryDir);
     const pid = config.projectId;
 
@@ -611,7 +605,7 @@ async function getProjectDb(cwd: string) {
     process.exit(1);
   }
   const config = readProjectConfig(projectMemoryDir);
-  const { conn } = getDb(projectMemoryDir);
+  const { conn } = await getDb(projectMemoryDir);
   await applySchema(conn, projectMemoryDir); // runs migrations; all statements are idempotent
   return { config, conn, projectMemoryDir };
 }

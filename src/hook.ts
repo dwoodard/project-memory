@@ -154,7 +154,7 @@ async function main(): Promise<void> {
       const projectMemoryDir2 = findProjectMemoryDir(cwd);
       if (projectMemoryDir2) {
         const config = readProjectConfig(projectMemoryDir2);
-        const { conn: conn2 } = getDb(projectMemoryDir2);
+        const { conn: conn2 } = await getDb(projectMemoryDir2);
         await applySchema(conn2, projectMemoryDir2);
         const pid = config.projectId;
 

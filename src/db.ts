@@ -10,10 +10,14 @@ const _cache = new Map<string, {
   conn: InstanceType<typeof kuzu.Connection>;
 }>();
 
-export function getDb(projectMemoryDir: string): {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function getDb(projectMemoryDir: string): Promise<{
   db: InstanceType<typeof kuzu.Database>;
   conn: InstanceType<typeof kuzu.Connection>;
-} {
+}> {
   const cached = _cache.get(projectMemoryDir);
   if (cached) return cached;
 
@@ -21,10 +25,25 @@ export function getDb(projectMemoryDir: string): {
   const graphDir = path.join(projectMemoryDir, "graph");
   fs.mkdirSync(graphDir, { recursive: true });
   const dbPath = path.join(graphDir, "database.kz");
-  const db = new kuzu.Database(dbPath);
-  const conn = new kuzu.Connection(db);
-  _cache.set(projectMemoryDir, { db, conn });
-  return { db, conn };
+
+  // Retry when another process holds the lock (e.g. a hook still running)
+  const maxAttempts = 15;
+  const delayMs = 300;
+  let lastErr: unknown;
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const db = new kuzu.Database(dbPath);
+      const conn = new kuzu.Connection(db);
+      _cache.set(projectMemoryDir, { db, conn });
+      return { db, conn };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("Could not set lock")) throw err;
+      lastErr = err;
+      await sleep(delayMs);
+    }
+  }
+  throw lastErr;
 }
 
 export async function applySchema(

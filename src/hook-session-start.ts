@@ -37,7 +37,7 @@ async function main(): Promise<void> {
     if (!projectMemoryDir) process.exit(0);
 
     const config = readProjectConfig(projectMemoryDir);
-    const { conn } = getDb(projectMemoryDir);
+    const { conn } = await getDb(projectMemoryDir);
 
     const bundle = await querySessionBundle(conn, config.projectId, payload.session_id);
     if (bundle) process.stdout.write(bundle + "\n");

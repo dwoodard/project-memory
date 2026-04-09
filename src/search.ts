@@ -221,13 +221,3 @@ export async function searchGraph(
     .sort((a, b) => b.score - a.score)
     .slice(0, topK);
 }
-
-/** @deprecated use searchGraph */
-export const searchMemoriesWithGraph = searchGraph as unknown as (
-  conn: InstanceType<typeof kuzu.Connection>,
-  projectId: string,
-  query: string,
-  topK?: number,
-  seedK?: number,
-  embedFn?: (text: string) => Promise<number[]>
-) => Promise<ScoredMemory[]>;

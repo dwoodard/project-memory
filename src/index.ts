@@ -26,7 +26,7 @@ export async function ingestTurn(turn: Turn): Promise<void> {
     console.error("Project not initialized. Run: pensieve init");
     return;
   }
-  const { conn } = getDb(projectMemoryDir);
+  const { conn } = await getDb(projectMemoryDir);
 
   // 1. Resolve session
   const sessionId = resolveSession(turn, projectMemoryDir, config);

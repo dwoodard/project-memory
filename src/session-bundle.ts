@@ -7,6 +7,7 @@
 import { queryAll, escape } from "./kuzu-helpers.js";
 import type kuzu from "kuzu";
 import type { Session, Task } from "./types.js";
+import { searchGraph, type ScoredNode } from "./search.js";
 
 const BUDGET = 2000;
 
@@ -35,7 +36,8 @@ export function buildBundle(
   recentlyDone: Task[],
   lastSession: Session | null,
   activeSubtasks: Task[] = [],
-  projectDescription?: string
+  projectDescription?: string,
+  keyMemories: ScoredNode[] = []
 ): string {
   const lines: string[] = [];
   let remaining = BUDGET;
@@ -109,6 +111,24 @@ export function buildBundle(
     push("");
   }
 
+  if (keyMemories.length > 0) {
+    const MEMORY_BUDGET = 500;
+    let memUsed = 0;
+    const memPush = (line: string) => {
+      if (memUsed >= MEMORY_BUDGET) return;
+      const safe = truncate(line, MEMORY_BUDGET - memUsed);
+      lines.push(safe);
+      memUsed += safe.length + 1;
+      remaining -= safe.length + 1;
+    };
+    memPush(`## Key Memories`);
+    for (const m of keyMemories) {
+      memPush(`[${m.kind ?? "memory"}] ${m.title}: ${m.summary}`);
+      if (m.recallCue) memPush(`  when: ${m.recallCue}`);
+    }
+    memPush("");
+  }
+
   if (lastSession) {
     const sid = lastSession.id.slice(0, 8);
     push(`## Last Session [${sid}]`);
@@ -122,7 +142,8 @@ export function buildBundle(
 export async function querySessionBundle(
   conn: InstanceType<typeof kuzu.Connection>,
   pid: string,
-  excludeSessionId = ""
+  excludeSessionId = "",
+  { includeMemories = false }: { includeMemories?: boolean } = {}
 ): Promise<string> {
   const activeRows = await queryAll(conn,
     `MATCH (t:Task {projectId: '${pid}', status: 'active'})
@@ -167,5 +188,16 @@ export async function querySessionBundle(
     activeSubtasks = subtaskRows.map((r) => r["t"] as Task);
   }
 
-  return buildBundle(activeTask, pending, blocked, recentlyDone, lastSession, activeSubtasks, projectDescription);
+  // Semantic search: only when caller opts in (avoids holding DB lock during embed network call)
+  let keyMemories: ScoredNode[] = [];
+  if (includeMemories && activeTask?.title) {
+    try {
+      keyMemories = await searchGraph(conn, pid, activeTask.title, 5, 3);
+      keyMemories = keyMemories.filter((n) => n.nodeType === "memory");
+    } catch {
+      // Embeddings not configured or unavailable — skip silently
+    }
+  }
+
+  return buildBundle(activeTask, pending, blocked, recentlyDone, lastSession, activeSubtasks, projectDescription, keyMemories);
 }

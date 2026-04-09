@@ -44,7 +44,7 @@ async function main(): Promise<void> {
     const config = readProjectConfig(projectMemoryDir);
     if (!config.llm?.model || config.llm.model === "local-model") process.exit(0);
 
-    const { conn } = getDb(projectMemoryDir);
+    const { conn } = await getDb(projectMemoryDir);
     const sessionId = payload.session_id;
 
     // Generate a meaningful title and summary for this session

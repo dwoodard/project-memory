@@ -34,7 +34,7 @@ export async function initProject(cwd: string): Promise<boolean> {
   }
 
   // Initialize Kuzu and apply schema
-  const { conn } = getDb(projectMemoryDir);
+  const { conn } = await getDb(projectMemoryDir);
   await applySchema(conn);
 
   // Write config with LLM defaults
