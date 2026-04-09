@@ -663,9 +663,10 @@ function printTaskList(
   pending: Record<string, unknown>[],
   blocked: Record<string, unknown>[],
   done: Record<string, unknown>[],
-  subtasks: Record<string, unknown>[] = []
+  subtasks: Record<string, unknown>[] = [],
+  suggestedDone: Record<string, unknown>[] = []
 ): void {
-  if (!active && pending.length === 0 && blocked.length === 0 && done.length === 0) {
+  if (!active && pending.length === 0 && blocked.length === 0 && done.length === 0 && suggestedDone.length === 0) {
     console.log("No tasks. Add one: pensieve tasks add \"title\"");
     return;
   }
@@ -705,6 +706,18 @@ function printTaskList(
         "        ",
         "        "
       );
+    });
+  }
+
+  if (suggestedDone.length > 0) {
+    console.log(chalk.bold.cyan("\n  MAY BE DONE"));
+    suggestedDone.forEach((t) => {
+      const id = shortId(String(t["id"]));
+      console.log(`  ${chalk.cyan("?")}  ${chalk.dim("[" + id + "]")}  ${chalk.cyan(String(t["title"]))}`);
+      if (t["doneSuggestion"]) {
+        console.log(chalk.dim(`         "${String(t["doneSuggestion"]).slice(0, 100)}"`));
+      }
+      console.log(chalk.dim(`         → confirm: pensieve tasks done ${id}`));
     });
   }
 
@@ -752,13 +765,20 @@ tasksCmd
        RETURN m ORDER BY m.completedAt DESC, m.createdAt DESC`) : [];
     const subtaskRows = await queryAll(conn,
       `MATCH (t:Task {projectId: '${pid}'}) WHERE t.parentId <> '' RETURN t`);
+    const suggestedDoneRows = await queryAll(conn,
+      `MATCH (m:Task {projectId: '${pid}'})
+       WHERE (m.doneSuggestion <> '' AND m.doneSuggestion IS NOT NULL)
+       AND m.status <> 'done'
+       AND (m.parentId = '' OR m.parentId IS NULL)
+       RETURN m ORDER BY m.taskOrder ASC`);
 
     printTaskList(
       activeRows[0]?.["m"] as Record<string, unknown> | undefined,
       pendingRows.map((r) => r["m"] as Record<string, unknown>),
       blockedRows.map((r) => r["m"] as Record<string, unknown>),
       doneRows.map((r) => r["m"] as Record<string, unknown>),
-      subtaskRows.map((r) => r["t"] as Record<string, unknown>)
+      subtaskRows.map((r) => r["t"] as Record<string, unknown>),
+      suggestedDoneRows.map((r) => r["m"] as Record<string, unknown>)
     );
   });
 
