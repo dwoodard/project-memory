@@ -37,7 +37,8 @@ export function buildBundle(
   lastSession: Session | null,
   activeSubtasks: Task[] = [],
   projectDescription?: string,
-  keyMemories: ScoredNode[] = []
+  keyMemories: ScoredNode[] = [],
+  suggestedDone: Task[] = []
 ): string {
   const lines: string[] = [];
   let remaining = BUDGET;
@@ -95,6 +96,14 @@ export function buildBundle(
       pending.forEach((t, i) => {
         push(`  ${i + 1}. [${shortId(t.id)}] ${t.title}`);
         if (t.summary) push(`     ${truncate(t.summary, 80)}`);
+      });
+    }
+    if (suggestedDone.length > 0) {
+      push(`May Be Done:`);
+      suggestedDone.forEach((t) => {
+        push(`  ? [${shortId(t.id)}] ${t.title}`);
+        if (t.doneSuggestion) push(`     "${truncate(t.doneSuggestion, 100)}"`);
+        push(`     → confirm: pensieve tasks done ${shortId(t.id)}`);
       });
     }
     push(`Work the active task. When done run: pensieve tasks done --note "brief summary of what you accomplished"`);
@@ -199,5 +208,12 @@ export async function querySessionBundle(
     }
   }
 
-  return buildBundle(activeTask, pending, blocked, recentlyDone, lastSession, activeSubtasks, projectDescription, keyMemories);
+  const suggestedRows = await queryAll(conn,
+    `MATCH (t:Task {projectId: '${pid}'})
+     WHERE (t.doneSuggestion <> '' AND t.doneSuggestion IS NOT NULL)
+     AND t.status <> 'done'
+     RETURN t ORDER BY t.taskOrder ASC`);
+  const suggestedDone = suggestedRows.map((r) => r["t"] as Task);
+
+  return buildBundle(activeTask, pending, blocked, recentlyDone, lastSession, activeSubtasks, projectDescription, keyMemories, suggestedDone);
 }

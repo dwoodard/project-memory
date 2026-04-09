@@ -8,12 +8,13 @@
 
 import * as fs from "fs";
 import { findProjectMemoryDir } from "./hook-utils.js";
-import { readAllCandidates, reviewCandidates, clearCandidates, summarizeSession } from "./extract-memory.js";
+import { readAllCandidates, reviewCandidates, clearCandidates, summarizeSession, reviewTaskCompletion } from "./extract-memory.js";
 import { promoteToDb, getExistingMemories } from "./promote-memory.js";
 import { readProjectConfig } from "./config.js";
 import { getDb } from "./db.js";
 import { readSessionTurns } from "./update-summary.js";
-import { escape } from "./kuzu-helpers.js";
+import { escape, queryAll } from "./kuzu-helpers.js";
+import type { Task } from "./types.js";
 
 interface CompactPayload {
   session_id: string;
@@ -49,9 +50,11 @@ async function main(): Promise<void> {
 
     // Generate a meaningful title and summary for this session
     const rawLog = readSessionTurns(projectMemoryDir, sessionId);
+    let sessionSummary = "";
     if (rawLog) {
       try {
         const { title, summary } = await summarizeSession(rawLog, config.projectName);
+        sessionSummary = summary;
         if (title || summary) {
           await conn.query(
             `MATCH (s:Session {id: '${escape(sessionId)}'})
@@ -60,6 +63,28 @@ async function main(): Promise<void> {
         }
       } catch {
         // Don't block on summarization failure
+      }
+    }
+
+    // Review open tasks for completion based on session summary
+    if (sessionSummary) {
+      try {
+        const openRows = await queryAll(conn,
+          `MATCH (t:Task {projectId: '${escape(config.projectId)}'})
+           WHERE t.status = 'pending' OR t.status = 'active' OR t.status = 'blocked'
+           RETURN t ORDER BY t.taskOrder ASC`);
+        const openTasks = openRows.map((r) => r["t"] as Task);
+        if (openTasks.length > 0) {
+          const suggestions = await reviewTaskCompletion(sessionSummary, openTasks);
+          for (const { id, reason } of suggestions) {
+            await conn.query(
+              `MATCH (t:Task {id: '${escape(id)}'})
+               SET t.doneSuggestion = '${escape(reason)}'`
+            );
+          }
+        }
+      } catch {
+        // Never block compaction
       }
     }
 

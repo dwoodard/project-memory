@@ -7,7 +7,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { llmComplete } from "./llm.js";
-import type { Memory, MemoryKind, TaskStatus } from "./types.js";
+import type { Memory, MemoryKind, Task, TaskStatus } from "./types.js";
 
 export interface CandidateMemory {
   id: string;
@@ -241,6 +241,48 @@ export async function summarizeSession(
     };
   } catch {
     return { title: "", summary: "" };
+  }
+}
+
+// ─── Task completion review ───────────────────────────────────────────────────
+
+const TASK_REVIEW_PROMPT = `You are reviewing a coding session to identify which open tasks it completed.
+
+Session summary:
+{SUMMARY}
+
+Open tasks (JSON):
+{TASKS}
+
+Return ONLY tasks that this session clearly completed — not "maybe" or "partially".
+Be conservative. If uncertain, omit.
+
+Respond with JSON only. No markdown fences.
+[{"id": "task_...", "reason": "one sentence why this session completed it"}]
+Return [] if none are clearly done.`;
+
+export async function reviewTaskCompletion(
+  summary: string,
+  tasks: Task[]
+): Promise<{ id: string; reason: string }[]> {
+  if (!summary.trim() || tasks.length === 0) return [];
+
+  const taskList = tasks.map((t) => ({ id: t.id, title: t.title, summary: t.summary }));
+  const prompt = TASK_REVIEW_PROMPT
+    .replace("{SUMMARY}", summary)
+    .replace("{TASKS}", JSON.stringify(taskList, null, 2));
+
+  const response = await llmComplete(prompt);
+  try {
+    const trimmed = response.trim().replace(/^```[a-z]*\n?/, "").replace(/\n?```$/, "");
+    const parsed = JSON.parse(trimmed);
+    if (!Array.isArray(parsed)) return [];
+    const validIds = new Set(tasks.map((t) => t.id));
+    return parsed
+      .filter((e) => e && typeof e.id === "string" && validIds.has(e.id) && typeof e.reason === "string")
+      .map((e) => ({ id: String(e.id), reason: String(e.reason).slice(0, 200) }));
+  } catch {
+    return [];
   }
 }
 

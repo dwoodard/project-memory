@@ -182,6 +182,7 @@ export async function applySchema(
   try { await conn.query(`ALTER TABLE Session ADD archived BOOLEAN DEFAULT false`); } catch { /* exists */ }
   try { await conn.query(`ALTER TABLE Memory ADD embedding FLOAT[] DEFAULT []`); } catch { /* exists */ }
   try { await conn.query(`ALTER TABLE Task ADD embedding FLOAT[] DEFAULT []`); } catch { /* exists */ }
+  try { await conn.query(`ALTER TABLE Task ADD doneSuggestion STRING DEFAULT ''`); } catch { /* exists */ }
   try { await conn.query(`ALTER TABLE Session ADD embedding FLOAT[] DEFAULT []`); } catch { /* exists */ }
 
   // Edge property migrations

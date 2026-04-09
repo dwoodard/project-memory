@@ -946,7 +946,7 @@ tasksCmd
        SET m.status = 'pending', m.taskOrder = ${minOrder - 1}`
     );
     await conn.query(
-      `MATCH (m:Task {id: '${esc(target_id)}'}) SET m.status = 'active'`
+      `MATCH (m:Task {id: '${esc(target_id)}'}) SET m.status = 'active', m.doneSuggestion = ''`
     );
 
     const title = pending.find((t) => String(t["id"]) === target_id)?.["title"];
@@ -969,7 +969,7 @@ tasksCmd
          RETURN m LIMIT 1`);
       if (rows.length === 0) { console.log(chalk.dim("No active task.")); return; }
       const task = rows[0]["m"] as Record<string, unknown>;
-      await conn.query(`MATCH (m:Task {id: '${esc(String(task["id"]))}' }) SET m.status = 'done', m.completedAt = '${new Date().toISOString()}', m.completionNote = '${esc(note)}'`);
+      await conn.query(`MATCH (m:Task {id: '${esc(String(task["id"]))}' }) SET m.status = 'done', m.completedAt = '${new Date().toISOString()}', m.completionNote = '${esc(note)}', m.doneSuggestion = ''`);
       console.log(`${chalk.green("Done:")} ${task["title"]}`);
       if (note) console.log(chalk.dim(`  "${note}"`));
       return;
@@ -990,7 +990,7 @@ tasksCmd
         task = all.find((t) => shortId(String(t["id"])).startsWith(target));
       }
       if (!task) { cerr(`No task matching "${target}"`); continue; }
-      await conn.query(`MATCH (m:Task {id: '${esc(String(task["id"]))}' }) SET m.status = 'done', m.completedAt = '${new Date().toISOString()}', m.completionNote = '${esc(note)}'`);
+      await conn.query(`MATCH (m:Task {id: '${esc(String(task["id"]))}' }) SET m.status = 'done', m.completedAt = '${new Date().toISOString()}', m.completionNote = '${esc(note)}', m.doneSuggestion = ''`);
       console.log(`${chalk.green("Done:")} ${task["title"]}`);
       if (note) console.log(chalk.dim(`  "${note}"`));
     }
