@@ -18,7 +18,7 @@ Instead of a silver, cloud-filled bowl, we have a tiny, local graph database tha
 
 ## How it Works
 
-Pensieve hooks directly into Claude Code's lifecycle events, running silently in the background and storing memory nodes into a local [Kuzu](https://kuzudb.com/) graph database inside your repo.
+Pensieve hooks directly into Claude Code's lifecycle events, running silently in the background and storing memory nodes into a local [Kuzu](https://kuzudb.github.io/docs/extensions/) graph database inside your repo.
 
 ```
 Session starts  →  Pensieve injects a context bundle into Claude's system prompt
