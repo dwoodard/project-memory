@@ -683,8 +683,12 @@ function formatTaskTitleWithBranch(task: Record<string, unknown>): string {
   const status = String(task["status"] ?? "");
 
   if (status === "in-review" && prUrl) {
-    const prMatch = prUrl.match(/#(\d+)/);
-    const prNum = prMatch ? prMatch[1] : "?";
+    // Extract PR number from URL: either #123 or /pull/123
+    let prNum = "?";
+    const hashMatch = prUrl.match(/#(\d+)/);
+    const pullMatch = prUrl.match(/\/pull\/(\d+)/);
+    if (hashMatch) prNum = hashMatch[1];
+    else if (pullMatch) prNum = pullMatch[1];
     return `${String(task["title"])}  ${chalk.blue(`[PR #${prNum} — awaiting review]`)}`;
   }
 
