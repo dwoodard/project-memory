@@ -63,6 +63,7 @@ export function writeSummary(
   summary: string
 ): void {
   const summaryPath = getSummaryPath(projectMemoryDir, sessionId);
+  fs.mkdirSync(path.dirname(summaryPath), { recursive: true });
   fs.writeFileSync(summaryPath, summary);
 }
 

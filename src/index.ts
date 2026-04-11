@@ -2,7 +2,7 @@ import * as path from "path";
 import { detectProject } from "./detect-project.js";
 import { getDb } from "./db.js";
 import { queryAll, escape } from "./kuzu-helpers.js";
-import { appendTurn, resolveSession } from "./append-turn.js";
+import { writeSessionLog, upsertTurnToGraph, resolveSession } from "./append-turn.js";
 import { readSummary, writeSummary, buildUpdatedSummary, readSessionTurns } from "./update-summary.js";
 import { extractFromTurn, writeCandidateFile, summarizeSession } from "./extract-memory.js";
 import { promoteToDb } from "./promote-memory.js";
@@ -26,12 +26,29 @@ export async function ingestTurn(turn: Turn): Promise<void> {
     console.error("Project not initialized. Run: pensieve init");
     return;
   }
-  const { conn } = await getDb(projectMemoryDir);
-
-  // 1. Resolve session
+  // 1. Resolve session and write JSONL immediately — before any DB operations.
+  //    This ensures the turn is always logged even if the DB is unavailable.
   const sessionId = resolveSession(turn, projectMemoryDir, config);
+  const entry = writeSessionLog(turn, projectMemoryDir, sessionId);
+  const turnId = entry.turnId;
 
   const userText = turn.messages.find((m) => m.role === "user")?.content ?? "";
+
+  // 2. Update rolling session summary file (no DB required)
+  const existingSummary = readSummary(projectMemoryDir, sessionId);
+  const updatedSummary = buildUpdatedSummary(existingSummary, turn);
+  writeSummary(projectMemoryDir, sessionId, updatedSummary);
+
+  // 3. DB operations — wrapped so a failure here never blocks the JSONL log above
+  let conn: Awaited<ReturnType<typeof getDb>>["conn"] | undefined;
+  try {
+    ({ conn } = await getDb(projectMemoryDir));
+  } catch {
+    return; // DB unavailable; JSONL already written above
+  }
+
+  // Upsert Turn node now that we have a connection
+  upsertTurnToGraph(conn, entry, sessionId, config.projectId);
 
   // Ensure session exists in DB
   const sessionRows = await queryAll(
@@ -68,17 +85,10 @@ export async function ingestTurn(turn: Turn): Promise<void> {
     // Best-effort embedding of session title
     embed(title).then((vec) => {
       const literal = `[${vec.join(", ")}]`;
-      conn.query(`MATCH (s:Session {id: '${escape(sessionId)}'}) SET s.embedding = ${literal}`).catch(() => {});
+      conn!.query(`MATCH (s:Session {id: '${escape(sessionId)}'}) SET s.embedding = ${literal}`).catch(() => {});
     }).catch(() => {});
   }
 
-  // 2. Append turn to session log
-  const turnId = appendTurn(turn, projectMemoryDir, sessionId, conn, config.projectId);
-
-  // 3. Update rolling session summary — write to file and sync to Kuzu
-  const existingSummary = readSummary(projectMemoryDir, sessionId);
-  const updatedSummary = buildUpdatedSummary(existingSummary, turn);
-  writeSummary(projectMemoryDir, sessionId, updatedSummary);
   await conn.query(
     `MATCH (s:Session {id: '${escape(sessionId)}'})
      SET s.summary = '${escape(updatedSummary)}'`

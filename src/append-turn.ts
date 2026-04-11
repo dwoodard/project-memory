@@ -18,26 +18,30 @@ function langFromPath(p: string): string {
   return map[ext] ?? ext;
 }
 
-export function appendTurn(
+export type TurnEntry = {
+  turnId: string;
+  timestamp: string;
+  messages: Array<{ role: string; content: string }>;
+  files: string[];
+  promptId?: string;
+};
+
+/**
+ * Writes a turn to the session JSONL file and returns the entry.
+ * Pure file I/O — no DB dependency. Call this first, before acquiring a DB connection.
+ */
+export function writeSessionLog(
   turn: Turn,
   projectMemoryDir: string,
   sessionId: string,
-  conn: InstanceType<typeof kuzu.Connection>,
-  projectId: string
-): string {
+): TurnEntry {
   const sessionsDir = path.join(projectMemoryDir, "sessions");
   const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
 
   const allText = turn.messages.map((m) => m.content).join(" ");
   const filePaths = extractFilePaths(allText);
 
-  const entry: {
-    turnId: string;
-    timestamp: string;
-    messages: Array<{ role: string; content: string }>;
-    files: string[];
-    promptId?: string;
-  } = {
+  const entry: TurnEntry = {
     turnId: `turn_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
     timestamp: turn.timestamp,
     messages: turn.messages,
@@ -45,11 +49,37 @@ export function appendTurn(
     ...(turn.promptId ? { promptId: turn.promptId } : {}),
   };
 
+  fs.mkdirSync(sessionsDir, { recursive: true });
   fs.appendFileSync(sessionFile, JSON.stringify(entry) + "\n");
 
-  // Upsert Turn node and related graph edges — fire and forget
-  upsertTurnNode(conn, entry, sessionId, projectId).catch(() => {});
+  return entry;
+}
 
+/**
+ * Upserts a Turn node and its edges into the graph DB.
+ * Fire-and-forget — errors are swallowed so they never block the caller.
+ */
+export function upsertTurnToGraph(
+  conn: InstanceType<typeof kuzu.Connection>,
+  entry: TurnEntry,
+  sessionId: string,
+  projectId: string,
+): void {
+  upsertTurnNode(conn, entry, sessionId, projectId).catch(() => {});
+}
+
+/** Convenience wrapper: writes JSONL then schedules the graph upsert. */
+export function appendTurn(
+  turn: Turn,
+  projectMemoryDir: string,
+  sessionId: string,
+  conn?: InstanceType<typeof kuzu.Connection>,
+  projectId?: string
+): string {
+  const entry = writeSessionLog(turn, projectMemoryDir, sessionId);
+  if (conn && projectId) {
+    upsertTurnToGraph(conn, entry, sessionId, projectId);
+  }
   return entry.turnId;
 }
 
