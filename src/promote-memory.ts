@@ -1,5 +1,5 @@
 import * as crypto from "crypto";
-import { queryAll, escape } from "./kuzu-helpers.js";
+import { queryBuilder } from "./kuzu-helpers.js";
 import { embed } from "./llm.js";
 import { cosineSimilarity } from "./search.js";
 import type { Memory, Task } from "./types.js";
@@ -16,12 +16,13 @@ async function linkRelatedMemories(
 ): Promise<void> {
   if (memory.embedding.length === 0) return;
 
-  const rows = await queryAll(
-    conn,
-    `MATCH (m:Memory {projectId: '${escape(projectId)}'})
-     WHERE m.id <> '${escape(memory.id)}' AND size(m.embedding) > 0
-     RETURN m`
-  );
+  const rows = await queryBuilder(conn)
+    .cypher(`MATCH (m:Memory {projectId: $projectId})
+             WHERE m.id <> $memoryId AND size(m.embedding) > 0
+             RETURN m`)
+    .param("projectId", projectId)
+    .param("memoryId", memory.id)
+    .all();
 
   for (const row of rows) {
     const candidate = row["m"] as Memory & { embedding: number[] };
@@ -29,11 +30,16 @@ async function linkRelatedMemories(
     if (sim >= RELATED_THRESHOLD) {
       const now = new Date().toISOString();
       const score = Math.round(sim * 10000) / 10000;
-      await conn.query(
-        `MATCH (a:Memory {id: '${escape(memory.id)}'}), (b:Memory {id: '${escape(candidate.id)}'})
-         CREATE (a)-[:RELATED_TO {score: ${score}, createdAt: '${now}', model: '${escape(embeddingModel)}'}]->(b),
-                (b)-[:RELATED_TO {score: ${score}, createdAt: '${now}', model: '${escape(embeddingModel)}'}]->(a)`
-      );
+      await queryBuilder(conn)
+        .cypher(`MATCH (a:Memory {id: $aId}), (b:Memory {id: $bId})
+                 CREATE (a)-[:RELATED_TO {score: $score, createdAt: $createdAt, model: $model}]->(b),
+                        (b)-[:RELATED_TO {score: $score, createdAt: $createdAt, model: $model}]->(a)`)
+        .param("aId", memory.id)
+        .param("bId", candidate.id)
+        .param("score", score)
+        .param("createdAt", now)
+        .param("model", embeddingModel)
+        .count();
     }
   }
 }
@@ -44,32 +50,36 @@ async function promoteTask(
   conn: InstanceType<typeof kuzu.Connection>
 ): Promise<Task | null> {
   // Dedupe by title across Task nodes
-  const existing = await queryAll(
-    conn,
-    `MATCH (t:Task {projectId: '${escape(projectId)}'})
-     WHERE t.title = '${escape(c.title)}'
-     RETURN t.id`
-  );
-  if (existing.length > 0) return null;
+  const existing = await queryBuilder(conn)
+    .cypher(`MATCH (t:Task {projectId: $projectId})
+             WHERE t.title = $title
+             RETURN t.id`)
+    .param("projectId", projectId)
+    .param("title", c.title)
+    .one();
+
+  if (existing) return null;
 
   const status = c.status ?? "pending";
 
   if (status === "active") {
     // Enforce only-one-active
-    await conn.query(
-      `MATCH (t:Task {projectId: '${escape(projectId)}', status: 'active'})
-       SET t.status = 'pending'`
-    );
+    await queryBuilder(conn)
+      .cypher(`MATCH (t:Task {projectId: $projectId, status: 'active'})
+               SET t.status = 'pending'`)
+      .param("projectId", projectId)
+      .count();
   }
 
   let taskOrder = 0;
   if (status === "pending") {
-    const orderRows = await queryAll(
-      conn,
-      `MATCH (t:Task {projectId: '${escape(projectId)}', status: 'pending'})
-       RETURN max(t.taskOrder) AS maxOrder`
-    );
-    taskOrder = Number(orderRows[0]?.["maxOrder"] ?? 0) + 1;
+    const orderResult = await queryBuilder(conn)
+      .cypher(`MATCH (t:Task {projectId: $projectId, status: 'pending'})
+               RETURN max(t.taskOrder) AS maxOrder`)
+      .param("projectId", projectId)
+      .one();
+
+    taskOrder = Number(orderResult?.["maxOrder"] ?? 0) + 1;
   }
 
   const task: Task = {
@@ -82,17 +92,24 @@ async function promoteTask(
     createdAt: new Date().toISOString(),
   };
 
-  await conn.query(
-    `CREATE (t:Task {
-      id: '${escape(task.id)}',
-      title: '${escape(task.title)}',
-      summary: '${escape(task.summary)}',
-      status: '${escape(task.status)}',
-      taskOrder: ${task.taskOrder},
-      projectId: '${escape(task.projectId)}',
-      createdAt: '${escape(task.createdAt)}'
-    })`
-  );
+  await queryBuilder(conn)
+    .cypher(`CREATE (t:Task {
+      id: $id,
+      title: $title,
+      summary: $summary,
+      status: $status,
+      taskOrder: $taskOrder,
+      projectId: $projectId,
+      createdAt: $createdAt
+    })`)
+    .param("id", task.id)
+    .param("title", task.title)
+    .param("summary", task.summary)
+    .param("status", task.status)
+    .param("taskOrder", task.taskOrder)
+    .param("projectId", task.projectId)
+    .param("createdAt", task.createdAt)
+    .count();
 
   return task;
 }
@@ -113,13 +130,15 @@ export async function promoteToDb(
     }
 
     // Dedupe by title
-    const existing = await queryAll(
-      conn,
-      `MATCH (m:Memory {projectId: '${escape(projectId)}'})
-       WHERE m.title = '${escape(c.title)}'
-       RETURN m.id`
-    );
-    if (existing.length > 0) continue;
+    const existing = await queryBuilder(conn)
+      .cypher(`MATCH (m:Memory {projectId: $projectId})
+               WHERE m.title = $title
+               RETURN m.id`)
+      .param("projectId", projectId)
+      .param("title", c.title)
+      .one();
+
+    if (existing) continue;
 
     let embedding: number[] = [];
     try {
@@ -140,33 +159,45 @@ export async function promoteToDb(
       embedding,
     };
 
-    const embeddingLiteral = embedding.length > 0
-      ? `[${embedding.join(", ")}]`
-      : `[]`;
-
-    await conn.query(
-      `CREATE (m:Memory {
-        id: '${escape(memory.id)}',
-        kind: '${escape(memory.kind)}',
-        title: '${escape(memory.title)}',
-        summary: '${escape(memory.summary)}',
-        recallCue: '${escape(memory.recallCue)}',
-        projectId: '${escape(memory.projectId)}',
-        sessionId: '${escape(memory.sessionId)}',
-        createdAt: '${escape(memory.createdAt)}',
+    await queryBuilder(conn)
+      .cypher(`CREATE (m:Memory {
+        id: $id,
+        kind: $kind,
+        title: $title,
+        summary: $summary,
+        recallCue: $recallCue,
+        projectId: $projectId,
+        sessionId: $sessionId,
+        createdAt: $createdAt,
         status: '',
         taskOrder: 0,
-        embedding: ${embeddingLiteral}
-      })`
-    );
+        embedding: $embedding
+      })`)
+      .param("id", memory.id)
+      .param("kind", memory.kind)
+      .param("title", memory.title)
+      .param("summary", memory.summary)
+      .param("recallCue", memory.recallCue)
+      .param("projectId", memory.projectId)
+      .param("sessionId", memory.sessionId)
+      .param("createdAt", memory.createdAt)
+      .param("embedding", memory.embedding)
+      .count();
 
     // Link to session if it exists
-    const sessionRows = await queryAll(conn, `MATCH (s:Session {id: '${escape(c.sessionId)}'}) RETURN s`);
-    if (sessionRows.length > 0) {
-      await conn.query(
-        `MATCH (s:Session {id: '${escape(c.sessionId)}'}), (m:Memory {id: '${escape(memory.id)}'})
-         CREATE (s)-[:HAS_MEMORY {extractedFrom: '${escape(turnId)}'}]->(m)`
-      );
+    const sessionExists = await queryBuilder(conn)
+      .cypher(`MATCH (s:Session {id: $sessionId}) RETURN s`)
+      .param("sessionId", c.sessionId)
+      .one();
+
+    if (sessionExists) {
+      await queryBuilder(conn)
+        .cypher(`MATCH (s:Session {id: $sessionId}), (m:Memory {id: $memoryId})
+                 CREATE (s)-[:HAS_MEMORY {extractedFrom: $turnId}]->(m)`)
+        .param("sessionId", c.sessionId)
+        .param("memoryId", memory.id)
+        .param("turnId", turnId)
+        .count();
     }
 
     // Wire RELATED_TO edges to similar existing memories
@@ -188,10 +219,11 @@ export async function getExistingMemories(
   projectId: string,
   conn: InstanceType<typeof kuzu.Connection>
 ): Promise<Memory[]> {
-  const rows = await queryAll(
-    conn,
-    `MATCH (m:Memory {projectId: '${escape(projectId)}'})
-     RETURN m ORDER BY m.createdAt DESC LIMIT 50`
-  );
+  const rows = await queryBuilder(conn)
+    .cypher(`MATCH (m:Memory {projectId: $projectId})
+             RETURN m ORDER BY m.createdAt DESC LIMIT 50`)
+    .param("projectId", projectId)
+    .all();
+
   return rows.map((r) => r["m"] as Memory);
 }

@@ -4,7 +4,7 @@ import * as crypto from "crypto";
 import type { Turn } from "./types.js";
 import type { ProjectConfig } from "./config.js";
 import type kuzu from "kuzu";
-import { escape } from "./kuzu-helpers.js";
+import { queryBuilder } from "./kuzu-helpers.js";
 import { embed } from "./llm.js";
 import { extractFilePaths } from "./db.js";
 
@@ -93,63 +93,97 @@ async function upsertTurnNode(
   const assistantText = (entry.messages.find((m) => m.role === "assistant")?.content ?? "").slice(0, 400);
   const filePaths = entry.files;
 
-  await conn.query(
-    `CREATE (t:Turn {
-      id: '${escape(entry.turnId)}',
-      sessionId: '${escape(sessionId)}',
-      projectId: '${escape(projectId)}',
-      timestamp: '${escape(entry.timestamp)}',
-      userText: '${escape(userText)}',
-      assistantText: '${escape(assistantText)}',
-      embedding: []
-    })`
-  );
+  // Create Turn node
+  await queryBuilder(conn)
+    .cypher(`CREATE (t:Turn {
+      id: $id,
+      sessionId: $sessionId,
+      projectId: $projectId,
+      timestamp: $timestamp,
+      userText: $userText,
+      assistantText: $assistantText,
+      embedding: $embedding
+    })`)
+    .param("id", entry.turnId)
+    .param("sessionId", sessionId)
+    .param("projectId", projectId)
+    .param("timestamp", entry.timestamp)
+    .param("userText", userText)
+    .param("assistantText", assistantText)
+    .param("embedding", [])
+    .count();
 
   // Count existing turns to assign a stable turnIndex
-  const cntResult = await conn.query(
-    `MATCH (s:Session {id: '${escape(sessionId)}'})-[:HAS_TURN]->(t:Turn) RETURN count(t) AS cnt`
-  );
-  const cntQr = Array.isArray(cntResult) ? cntResult[0] : cntResult;
-  const cntRows = await (cntQr as { getAll(): Promise<Record<string, unknown>[]> }).getAll();
-  const turnIndex = Number(cntRows[0]?.["cnt"] ?? 0);
+  const cntResult = await queryBuilder(conn)
+    .cypher(`MATCH (s:Session {id: $sessionId})-[:HAS_TURN]->(t:Turn) RETURN count(t) AS cnt`)
+    .param("sessionId", sessionId)
+    .one();
 
-  await conn.query(
-    `MATCH (s:Session {id: '${escape(sessionId)}'}), (t:Turn {id: '${escape(entry.turnId)}'})
-     CREATE (s)-[:HAS_TURN {turnIndex: ${turnIndex}}]->(t)`
-  ).catch(() => {});
+  const turnIndex = Number(cntResult?.["cnt"] ?? 0);
 
+  // Create HAS_TURN edge with index
+  await queryBuilder(conn)
+    .cypher(`MATCH (s:Session {id: $sessionId}), (t:Turn {id: $turnId})
+             CREATE (s)-[:HAS_TURN {turnIndex: $turnIndex}]->(t)`)
+    .param("sessionId", sessionId)
+    .param("turnId", entry.turnId)
+    .param("turnIndex", turnIndex)
+    .count()
+    .catch(() => {});
+
+  // Upsert file nodes and create REFERENCES edges
   for (const fp of filePaths) {
     const fileId = `${projectId}:${fp}`;
     const lang = langFromPath(fp);
     const now = entry.timestamp;
 
-    const chk = await conn.query(`MATCH (f:File {id: '${escape(fileId)}'}) RETURN f.id`);
-    const cqr = Array.isArray(chk) ? chk[0] : chk;
-    const crow = await (cqr as { getAll(): Promise<Record<string, unknown>[]> }).getAll();
-    if (crow.length === 0) {
-      await conn.query(
-        `CREATE (f:File {id: '${escape(fileId)}', path: '${escape(fp)}',
-          projectId: '${escape(projectId)}', language: '${escape(lang)}',
-          lastSeenAt: '${escape(now)}'})`
-      ).catch(() => {});
+    // Check if file exists
+    const existing = await queryBuilder(conn)
+      .cypher(`MATCH (f:File {id: $fileId}) RETURN f.id`)
+      .param("fileId", fileId)
+      .one();
+
+    if (!existing) {
+      // Create new File node
+      await queryBuilder(conn)
+        .cypher(`CREATE (f:File {id: $id, path: $path, projectId: $projectId, language: $language, lastSeenAt: $lastSeenAt})`)
+        .param("id", fileId)
+        .param("path", fp)
+        .param("projectId", projectId)
+        .param("language", lang)
+        .param("lastSeenAt", now)
+        .count()
+        .catch(() => {});
     } else {
-      await conn.query(
-        `MATCH (f:File {id: '${escape(fileId)}'}) SET f.lastSeenAt = '${escape(now)}'`
-      ).catch(() => {});
+      // Update lastSeenAt
+      await queryBuilder(conn)
+        .cypher(`MATCH (f:File {id: $id}) SET f.lastSeenAt = $lastSeenAt`)
+        .param("id", fileId)
+        .param("lastSeenAt", now)
+        .count()
+        .catch(() => {});
     }
 
-    await conn.query(
-      `MATCH (t:Turn {id: '${escape(entry.turnId)}'}), (f:File {id: '${escape(fileId)}'})
-       CREATE (t)-[:REFERENCES {accessType: 'read'}]->(f)`
-    ).catch(() => {});
+    // Create REFERENCES edge
+    await queryBuilder(conn)
+      .cypher(`MATCH (t:Turn {id: $turnId}), (f:File {id: $fileId})
+               CREATE (t)-[:REFERENCES {accessType: 'read'}]->(f)`)
+      .param("turnId", entry.turnId)
+      .param("fileId", fileId)
+      .count()
+      .catch(() => {});
   }
 
   // Embed async
   const filesSuffix = filePaths.length > 0 ? `\nfiles: ${filePaths.join(", ")}` : "";
   const embedText = `user: ${userText}\nassistant: ${assistantText}${filesSuffix}`;
   embed(embedText).then((vec) => {
-    const literal = `[${vec.join(", ")}]`;
-    conn.query(`MATCH (t:Turn {id: '${escape(entry.turnId)}'}) SET t.embedding = ${literal}`).catch(() => {});
+    queryBuilder(conn)
+      .cypher(`MATCH (t:Turn {id: $id}) SET t.embedding = $embedding`)
+      .param("id", entry.turnId)
+      .param("embedding", vec)
+      .count()
+      .catch(() => {});
   }).catch(() => {});
 }
 

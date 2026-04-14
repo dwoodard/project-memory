@@ -1,5 +1,5 @@
 import { embed } from "./llm.js";
-import { queryAll, escape } from "./kuzu-helpers.js";
+import { queryBuilder } from "./kuzu-helpers.js";
 import type { Memory, Task, Session, TurnNode, ScoredMemory } from "./types.js";
 import type kuzu from "kuzu";
 
@@ -70,15 +70,17 @@ function turnNode(t: TurnNode & { embedding: number[] }, queryVec: number[], wei
 // ── Queries ─────────────────────────────────────────────────────────────────
 
 async function loadMemories(conn: InstanceType<typeof kuzu.Connection>, projectId: string) {
-  return queryAll(conn,
-    `MATCH (m:Memory {projectId: '${escape(projectId)}'}) WHERE size(m.embedding) > 0 RETURN m`
-  );
+  return queryBuilder(conn)
+    .cypher(`MATCH (m:Memory {projectId: $projectId}) WHERE size(m.embedding) > 0 RETURN m`)
+    .param("projectId", projectId)
+    .all();
 }
 
 async function loadTurns(conn: InstanceType<typeof kuzu.Connection>, projectId: string) {
-  return queryAll(conn,
-    `MATCH (t:Turn {projectId: '${escape(projectId)}'}) WHERE size(t.embedding) > 0 RETURN t`
-  );
+  return queryBuilder(conn)
+    .cypher(`MATCH (t:Turn {projectId: $projectId}) WHERE size(t.embedding) > 0 RETURN t`)
+    .param("projectId", projectId)
+    .all();
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -90,13 +92,24 @@ export async function searchAll(
   query: string,
   topK = 5
 ): Promise<ScoredNode[]> {
-  const pid = escape(projectId);
   const [queryVec, memRows, taskRows, sessionRows, turnRows] = await Promise.all([
     embed(query),
-    queryAll(conn, `MATCH (m:Memory {projectId: '${pid}'}) WHERE size(m.embedding) > 0 RETURN m`),
-    queryAll(conn, `MATCH (t:Task {projectId: '${pid}'}) WHERE size(t.embedding) > 0 RETURN t`),
-    queryAll(conn, `MATCH (s:Session {projectId: '${pid}'}) WHERE size(s.embedding) > 0 RETURN s`),
-    queryAll(conn, `MATCH (t:Turn {projectId: '${pid}'}) WHERE size(t.embedding) > 0 RETURN t`),
+    queryBuilder(conn)
+      .cypher(`MATCH (m:Memory {projectId: $projectId}) WHERE size(m.embedding) > 0 RETURN m`)
+      .param("projectId", projectId)
+      .all(),
+    queryBuilder(conn)
+      .cypher(`MATCH (t:Task {projectId: $projectId}) WHERE size(t.embedding) > 0 RETURN t`)
+      .param("projectId", projectId)
+      .all(),
+    queryBuilder(conn)
+      .cypher(`MATCH (s:Session {projectId: $projectId}) WHERE size(s.embedding) > 0 RETURN s`)
+      .param("projectId", projectId)
+      .all(),
+    queryBuilder(conn)
+      .cypher(`MATCH (t:Turn {projectId: $projectId}) WHERE size(t.embedding) > 0 RETURN t`)
+      .param("projectId", projectId)
+      .all(),
   ]);
 
   const results: ScoredNode[] = [
@@ -170,9 +183,11 @@ export async function searchGraph(
     const rel = seed.nodeType === "memory" ? "HAS_MEMORY" : "HAS_TURN";
     const nodeLabel = seed.nodeType === "memory" ? "Memory" : "Turn";
 
-    const sessionRows = await queryAll(conn,
-      `MATCH (s:Session)-[:${rel}]->(n:${nodeLabel} {id: '${escape(seed.id)}'})
-       RETURN s.id AS sid, s.title AS stitle, s.summary AS ssummary`);
+    const sessionRows = await queryBuilder(conn)
+      .cypher(`MATCH (s:Session)-[:${rel}]->(n:${nodeLabel} {id: $id})
+               RETURN s.id AS sid, s.title AS stitle, s.summary AS ssummary`)
+      .param("id", seed.id)
+      .all();
 
     await Promise.all(sessionRows.map(async (sr) => {
       const sid = String(sr["sid"]);
@@ -184,12 +199,18 @@ export async function searchGraph(
       }
 
       const [sibMemRows, sibTurnRows] = await Promise.all([
-        queryAll(conn,
-          `MATCH (s:Session {id: '${escape(sid)}'})-[:HAS_MEMORY]->(m:Memory)
-           WHERE m.id <> '${escape(seed.id)}' AND size(m.embedding) > 0 RETURN m`),
-        queryAll(conn,
-          `MATCH (s:Session {id: '${escape(sid)}'})-[:HAS_TURN]->(t:Turn)
-           WHERE t.id <> '${escape(seed.id)}' AND size(t.embedding) > 0 RETURN t`),
+        queryBuilder(conn)
+          .cypher(`MATCH (s:Session {id: $sessionId})-[:HAS_MEMORY]->(m:Memory)
+                   WHERE m.id <> $seedId AND size(m.embedding) > 0 RETURN m`)
+          .param("sessionId", sid)
+          .param("seedId", seed.id)
+          .all(),
+        queryBuilder(conn)
+          .cypher(`MATCH (s:Session {id: $sessionId})-[:HAS_TURN]->(t:Turn)
+                   WHERE t.id <> $seedId AND size(t.embedding) > 0 RETURN t`)
+          .param("sessionId", sid)
+          .param("seedId", seed.id)
+          .all(),
       ]);
 
       for (const r of sibMemRows) {
@@ -214,9 +235,12 @@ export async function searchGraph(
 
     // Walk RELATED_TO edges (memory seeds only)
     if (seed.nodeType === "memory") {
-      const relRows = await queryAll(conn,
-        `MATCH (m:Memory {id: '${escape(seed.id)}'})-[:RELATED_TO]->(rel:Memory)
-         WHERE size(rel.embedding) > 0 RETURN rel`);
+      const relRows = await queryBuilder(conn)
+        .cypher(`MATCH (m:Memory {id: $id})-[:RELATED_TO]->(rel:Memory)
+                 WHERE size(rel.embedding) > 0 RETURN rel`)
+        .param("id", seed.id)
+        .all();
+
       for (const rr of relRows) {
         const rel = rr["rel"] as Memory & { embedding: number[] };
         if (candidates.has(rel.id)) continue;

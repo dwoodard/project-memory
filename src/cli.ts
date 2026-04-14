@@ -328,7 +328,6 @@ program
       return;
     }
 
-    const { escape: esc } = await import("./kuzu-helpers.js");
     const showWalk = opts.walk;
     const walkHops = Math.max(1, parseInt(opts.walkHops ?? "1", 10));
 
@@ -346,7 +345,7 @@ program
         }
         if (showWalk) {
           const seedNode: GraphNode = { id: String(r.id), type: "Memory", label: r.title, properties: { id: r.id, title: r.title, kind: r.kind } };
-          const walks = await walkGraph(conn, seedNode, walkHops, esc);
+          const walks = await walkGraph(conn, seedNode, walkHops);
           if (walks.length > 1) {
             console.log(`   ${chalk.cyan("↳ connected to:")}`);
             for (const walk of walks.slice(1)) {
@@ -361,7 +360,7 @@ program
         if (r.summary) console.log(`   ${chalk.dim(r.summary)}`);
         if (showWalk) {
           const seedNode: GraphNode = { id: String(r.id), type: "Task", label: r.title, properties: { id: r.id, title: r.title, status: r.status } };
-          const walks = await walkGraph(conn, seedNode, walkHops, esc);
+          const walks = await walkGraph(conn, seedNode, walkHops);
           if (walks.length > 1) {
             console.log(`   ${chalk.cyan("↳ graph:")}`);
             for (const walk of walks.slice(1)) {
@@ -377,7 +376,7 @@ program
         if (r.summary) console.log(`   ${chalk.dim(r.summary.slice(0, 120) + (r.summary.length > 120 ? "…" : ""))}`);
         if (showWalk) {
           const seedNode: GraphNode = { id: String(r.id), type: "Session", label: r.title, properties: { id: r.id, title: r.title, startedAt: r.startedAt } };
-          const walks = await walkGraph(conn, seedNode, walkHops, esc);
+          const walks = await walkGraph(conn, seedNode, walkHops);
           if (walks.length > 1) {
             console.log(`   ${chalk.cyan("↳ graph:")}`);
             for (const walk of walks.slice(1)) {
@@ -1867,42 +1866,49 @@ interface WalkResult {
 
 async function findNodeById(
   conn: InstanceType<typeof kuzu.Connection>,
-  id: string,
-  esc: (s: string) => string
+  id: string
 ): Promise<GraphNode | null> {
+  const { queryBuilder } = await import("./kuzu-helpers.js");
   const nodeTypes = ["Session", "Memory", "Task", "Turn", "Project", "File"];
 
   // First try to match by ID
   for (const type of nodeTypes) {
-    const rows = await queryAll(conn,
-      `MATCH (n:${type})
-       WHERE n.id CONTAINS '${esc(id)}'
-       RETURN n LIMIT 1`);
+    const rows = await queryBuilder(conn)
+      .cypher(`MATCH (n:${type})
+               WHERE n.id CONTAINS $id
+               RETURN n LIMIT 1`)
+      .param("id", id)
+      .all();
+
     if (rows.length > 0) {
       const node = rows[0]["n"] as Record<string, unknown>;
       const nodeId = String(node["id"]);
       return {
         id: nodeId,
         type,
-        label: String(node["title"] ?? node["path"] ?? nodeId.slice(0, 8)),
+        label: String(node["title"] ?? node["path"] ?? node["name"] ?? nodeId.slice(0, 8)),
         properties: node,
       };
     }
   }
 
-  // Then try to match by title (for human-readable names)
-  for (const type of nodeTypes) {
-    const rows = await queryAll(conn,
-      `MATCH (n:${type})
-       WHERE n.title CONTAINS '${esc(id)}'
-       RETURN n LIMIT 1`);
+  // Then try to match by title or name (for human-readable names)
+  // Only try types that have these properties
+  for (const type of ["Session", "Memory", "Task"]) {
+    const rows = await queryBuilder(conn)
+      .cypher(`MATCH (n:${type})
+               WHERE n.title CONTAINS $id
+               RETURN n LIMIT 1`)
+      .param("id", id)
+      .all();
+
     if (rows.length > 0) {
       const node = rows[0]["n"] as Record<string, unknown>;
       const nodeId = String(node["id"]);
       return {
         id: nodeId,
         type,
-        label: String(node["title"] ?? node["path"] ?? nodeId.slice(0, 8)),
+        label: String(node["title"] ?? nodeId.slice(0, 8)),
         properties: node,
       };
     }
@@ -1914,9 +1920,9 @@ async function findNodeById(
 async function walkGraph(
   conn: InstanceType<typeof kuzu.Connection>,
   startNode: GraphNode,
-  hops: number,
-  esc: (s: string) => string
+  hops: number
 ): Promise<WalkResult[]> {
+  const { queryBuilder } = await import("./kuzu-helpers.js");
   const results: WalkResult[] = [];
   const visited = new Set<string>();
   const queue: Array<{ node: GraphNode; depth: number }> = [{ node: startNode, depth: 0 }];
@@ -1934,11 +1940,12 @@ async function walkGraph(
 
     // Check each relationship type from this node
     for (const relType of relTypes) {
-      const queryStr = `MATCH (n:${node.type} {id: '${esc(node.id)}'}) -[:${relType}]->(target)
-                       RETURN target`;
-
       try {
-        const rows = await queryAll(conn, queryStr);
+        const rows = await queryBuilder(conn)
+          .cypher(`MATCH (n:${node.type} {id: $id}) -[:${relType}]->(target)
+                   RETURN target`)
+          .param("id", node.id)
+          .all();
         if (rows.length > 0) {
           if (!byRelType.has(relType)) {
             byRelType.set(relType, []);
@@ -2047,23 +2054,25 @@ program
   .option("-n, --hops <n>", "Number of hops to traverse — shows all relation types (default 2)", "2")
   .action(async (id: string | undefined, opts: { hops: string }) => {
     const { config, conn } = await getProjectDb(process.cwd());
-    const { escape: esc } = await import("./kuzu-helpers.js");
 
     const hops = Math.max(1, parseInt(opts.hops ?? "2", 10));
 
     // Find the seed node
     let seedNode: GraphNode | null = null;
     if (id) {
-      seedNode = await findNodeById(conn, id, esc);
+      seedNode = await findNodeById(conn, id);
       if (!seedNode) {
         cerr(`No node matching "${id}". Try: pensieve search or pensieve tasks`);
         process.exit(1);
       }
     } else {
       // Default: most recent Memory or Session
-      const recentRows = await queryAll(conn,
-        `MATCH (n:Session)
-         RETURN n ORDER BY n.startedAt DESC LIMIT 1`);
+      const { queryBuilder } = await import("./kuzu-helpers.js");
+      const recentRows = await queryBuilder(conn)
+        .cypher(`MATCH (n:Session)
+                 RETURN n ORDER BY n.startedAt DESC LIMIT 1`)
+        .all();
+
       if (recentRows.length > 0) {
         const node = recentRows[0]["n"] as Record<string, unknown>;
         seedNode = {
@@ -2078,7 +2087,7 @@ program
       }
     }
 
-    const results = await walkGraph(conn, seedNode, hops, esc);
+    const results = await walkGraph(conn, seedNode, hops);
     formatWalkResults(results);
   });
 
