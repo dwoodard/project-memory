@@ -468,6 +468,90 @@ program
   });
 
 program
+  .command("decisions [status]")
+  .description("List architectural decisions by status (pending, implemented, blocked, superseded, abandoned)")
+  .option("--all", "Show all decisions regardless of status")
+  .action(async (status?: string, opts?: { all: boolean }) => {
+    const detected = detectProject(process.cwd());
+    if (!detected) { cerr("No pensieve project found. Run: pensieve init"); process.exit(1); }
+
+    const projectMemoryDir = path.join(detected.projectRoot, ".pensieve");
+    const config = readProjectConfig(projectMemoryDir);
+    const { conn } = await getDb(projectMemoryDir);
+    await applySchema(conn, projectMemoryDir);
+    const pid = config.projectId;
+    const { escape: esc } = await import("./kuzu-helpers.js");
+
+    // Validate status if provided
+    const validStatuses = ["pending", "implemented", "blocked", "superseded", "abandoned"];
+    if (status && !validStatuses.includes(status) && !opts?.all) {
+      cerr(`Invalid status: ${status}`);
+      cerr(`Valid statuses: ${validStatuses.join(", ")}`);
+      process.exit(1);
+    }
+
+    // Build query
+    let query = `MATCH (m:Memory {projectId: '${esc(pid)}', kind: 'decision'})`;
+    if (status && !opts?.all) {
+      query += ` WHERE m.decisionStatus = '${esc(status)}'`;
+    }
+    query += ` RETURN m.id as id, m.title as title, m.summary as summary, m.decisionStatus as status, m.createdAt as createdAt ORDER BY m.createdAt DESC`;
+
+    const result = await queryAll(conn, query);
+
+    if (result.length === 0) {
+      console.log(chalk.yellow(`\nNo decisions found${status ? ` with status "${status}"` : ""}\n`));
+      process.exit(0);
+    }
+
+    console.log(`\n${chalk.bold.cyan(`Decisions${status ? ` (${status})` : ""}:`)} ${result.length}\n`);
+
+    // Group by status if showing all
+    if (opts?.all) {
+      const byStatus: Record<string, typeof result> = {};
+      for (const row of result) {
+        const s = String(row.status || "unknown");
+        if (!byStatus[s]) byStatus[s] = [];
+        byStatus[s].push(row);
+      }
+
+      for (const stat of validStatuses) {
+        const items = byStatus[stat] || [];
+        if (items.length === 0) continue;
+
+        const icon = stat === "pending" ? "⏳" : stat === "implemented" ? "✅" : stat === "blocked" ? "🚫" : stat === "superseded" ? "↪️" : "❌";
+        console.log(`${chalk.bold.cyan(icon)} ${stat.toUpperCase()} (${items.length})`);
+        items.forEach((row) => {
+          const created = new Date(String(row.createdAt)).toLocaleDateString();
+          console.log(`  [${String(row.id).slice(0, 6)}] ${String(row.title)}`);
+          if (row.summary) console.log(`           ${String(row.summary).slice(0, 80)}`);
+          console.log(`           ${chalk.gray(created)}`);
+        });
+        console.log("");
+      }
+    } else {
+      // Show single status
+      const statusIcon: Record<string, string> = {
+        pending: "⏳",
+        implemented: "✅",
+        blocked: "🚫",
+        superseded: "↪️",
+        abandoned: "❌",
+      };
+
+      result.forEach((row) => {
+        const created = new Date(String(row.createdAt)).toLocaleDateString();
+        const icon = statusIcon[String(row.status)] || "•";
+        console.log(`${icon} [${String(row.id).slice(0, 6)}] ${String(row.title)}`);
+        if (row.summary) console.log(`   ${String(row.summary).slice(0, 90)}`);
+        console.log(`   ${chalk.gray(created)}\n`);
+      });
+    }
+
+    conn.close();
+  });
+
+program
   .command("backfill-embeddings")
   .description("Generate and store embeddings for all nodes missing them (Memory, Task, Session, Turn)")
   .action(async () => {

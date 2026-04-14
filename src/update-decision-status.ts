@@ -21,12 +21,14 @@ export async function updateDecisionStatus(
   }
 
   const now = new Date().toISOString();
-  const noteEsc = note ? `, statusNote: '${escape(note)}'` : "";
+  let query = `MATCH (m:Memory {id: '${escape(memoryId)}', kind: 'decision'})
+     SET m.decisionStatus = '${escape(status)}', m.statusUpdatedAt = '${escape(now)}'`;
 
-  await conn.query(
-    `MATCH (m:Memory {id: '${escape(memoryId)}', kind: 'decision'})
-     SET m.decisionStatus = '${escape(status)}', m.statusUpdatedAt = '${escape(now)}'${noteEsc}`
-  );
+  if (note) {
+    query += `, m.statusNote = '${escape(note)}'`;
+  }
+
+  await conn.query(query);
 }
 
 export async function getDecisionsByStatus(
