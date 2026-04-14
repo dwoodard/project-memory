@@ -471,7 +471,8 @@ program
   .command("decisions [status]")
   .description("List architectural decisions by status (pending, implemented, blocked, superseded, abandoned)")
   .option("--all", "Show all decisions regardless of status")
-  .action(async (status?: string, opts?: { all: boolean }) => {
+  .option("--stats", "Show decision tracking statistics")
+  .action(async (status?: string, opts?: { all: boolean; stats: boolean }) => {
     const detected = detectProject(process.cwd());
     if (!detected) { cerr("No pensieve project found. Run: pensieve init"); process.exit(1); }
 
@@ -498,6 +499,42 @@ program
     query += ` RETURN m.id as id, m.title as title, m.summary as summary, m.decisionStatus as status, m.createdAt as createdAt ORDER BY m.createdAt DESC`;
 
     const result = await queryAll(conn, query);
+
+    if (opts?.stats) {
+      // Get all decisions for stats
+      const allDecisions = await queryAll(conn, `MATCH (m:Memory {projectId: '${esc(pid)}', kind: 'decision'}) RETURN m.decisionStatus as status`);
+
+      const statuses = {
+        pending: 0,
+        implemented: 0,
+        blocked: 0,
+        superseded: 0,
+        abandoned: 0,
+      };
+
+      for (const row of allDecisions) {
+        const s = String(row.status || "pending") as keyof typeof statuses;
+        if (s in statuses) statuses[s]++;
+      }
+
+      const total = allDecisions.length;
+      const implemented = statuses.implemented;
+      const implementedRate = total > 0 ? Math.round((implemented * 100) / total) : 0;
+
+      console.log("\n" + chalk.bold.cyan("DECISION TRACKING STATUS:"));
+      console.log(chalk.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+      console.log(`${chalk.cyan("⏳")} PENDING:      ${statuses.pending}`);
+      console.log(`${chalk.green("✅")} IMPLEMENTED: ${statuses.implemented}`);
+      console.log(`${chalk.cyan("↪️")}  SUPERSEDED:  ${statuses.superseded}`);
+      console.log(`${chalk.red("❌")} ABANDONED:   ${statuses.abandoned}`);
+      console.log(`${chalk.yellow("🚫")} BLOCKED:     ${statuses.blocked}`);
+      console.log(chalk.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+      console.log(`${chalk.magenta("📊")} TOTAL:        ${total} decisions`);
+      console.log(`${chalk.green("✨")} IMPLEMENTED:  ${implementedRate}%\n`);
+
+      conn.close();
+      process.exit(0);
+    }
 
     if (result.length === 0) {
       console.log(chalk.yellow(`\nNo decisions found${status ? ` with status "${status}"` : ""}\n`));
@@ -546,6 +583,37 @@ program
         if (row.summary) console.log(`   ${String(row.summary).slice(0, 90)}`);
         console.log(`   ${chalk.gray(created)}\n`);
       });
+    }
+
+    conn.close();
+  });
+
+program
+  .command("decision <id>")
+  .description("Update a decision's status")
+  .option("--status <status>", "New status: pending, implemented, blocked, superseded, abandoned")
+  .option("--note <note>", "Optional note about the status change")
+  .action(async (id: string, opts: { status?: string; note?: string }) => {
+    if (!opts.status) {
+      cerr("--status is required");
+      process.exit(1);
+    }
+
+    const detected = detectProject(process.cwd());
+    if (!detected) { cerr("No pensieve project found. Run: pensieve init"); process.exit(1); }
+
+    const projectMemoryDir = path.join(detected.projectRoot, ".pensieve");
+    const { conn } = await getDb(projectMemoryDir);
+    await applySchema(conn, projectMemoryDir);
+
+    const { updateDecisionStatus } = await import("./update-decision-status.js");
+
+    try {
+      await updateDecisionStatus(conn, id, opts.status as any, opts.note);
+      console.log(chalk.green(`✓ Decision ${id} marked as ${opts.status}`));
+    } catch (err: any) {
+      cerr(`Failed to update decision: ${err.message}`);
+      process.exit(1);
     }
 
     conn.close();

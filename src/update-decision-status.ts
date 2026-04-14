@@ -4,7 +4,7 @@
  */
 
 import kuzu from "kuzu";
-import { escape } from "./kuzu-helpers.js";
+import { escape, queryAll } from "./kuzu-helpers.js";
 
 export type DecisionStatus = "pending" | "implemented" | "blocked" | "superseded" | "abandoned";
 
@@ -20,8 +20,24 @@ export async function updateDecisionStatus(
     throw new Error(`Invalid status: ${status}. Must be one of: ${VALID_STATUSES.join(", ")}`);
   }
 
+  // Try exact match first, then prefix match
+  let rows = await queryAll(conn, `MATCH (m:Memory {id: '${escape(memoryId)}', kind: 'decision'}) RETURN m.id`);
+
+  let actualId = memoryId;
+  if (rows.length === 0) {
+    // Try prefix match
+    const prefixRows = await queryAll(
+      conn,
+      `MATCH (m:Memory {kind: 'decision'}) WHERE m.id CONTAINS '${escape(memoryId)}' RETURN m.id LIMIT 1`
+    );
+    if (prefixRows.length === 0) {
+      throw new Error(`Decision not found: ${memoryId}`);
+    }
+    actualId = String(prefixRows[0]["m.id"]);
+  }
+
   const now = new Date().toISOString();
-  let query = `MATCH (m:Memory {id: '${escape(memoryId)}', kind: 'decision'})
+  let query = `MATCH (m:Memory {id: '${escape(actualId)}', kind: 'decision'})
      SET m.decisionStatus = '${escape(status)}', m.statusUpdatedAt = '${escape(now)}'`;
 
   if (note) {
