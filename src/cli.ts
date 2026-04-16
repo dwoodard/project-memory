@@ -20,6 +20,13 @@ import {
 import { embed, llmComplete } from "./llm.js";
 import { searchGraph } from "./search.js";
 import type { Turn } from "./types.js";
+import {
+  type WalkDirection,
+  type WalkStrategy,
+  WalkError,
+  resolveStartNode,
+  traverseDbGraph,
+} from "./walk.js";
 
 const cerr = (msg: string) => console.error(chalk.red(msg));
 
@@ -2096,8 +2103,10 @@ async function walkGraph(
   return results;
 }
 
-function formatWalkResults(results: WalkResult[]): void {
-  console.log(`\n${chalk.bold.cyan("── Graph Walk")}\n`);
+function formatWalkResults(results: WalkResult[], showHeader = true): void {
+  if (showHeader) {
+    console.log(`\n${chalk.bold.cyan("── Graph Walk")}\n`);
+  }
 
   for (const result of results) {
     const depthStr = result.depth > 0 ? chalk.dim(` [depth ${result.depth}]`) : "";
@@ -2134,45 +2143,162 @@ function formatWalkResults(results: WalkResult[]): void {
 
 program
   .command("walk [id]")
-  .description("Traverse any node and its connections up to N hops (auto-detects node type)")
-  .option("-n, --hops <n>", "Number of hops to traverse — shows all relation types (default 2)", "2")
-  .action(async (id: string | undefined, opts: { hops: string }) => {
-    const { config, conn } = await getProjectDb(process.cwd());
+  .description("Traverse graph from any node with relation/direction/depth controls")
+  .option("-n, --hops <n>", "Deprecated: use --depth instead")
+  .option("--depth <n>", "Traversal depth (>= 0)")
+  .option("--start-id <id>", "Start from a specific node id (supports selectors like memory:<id>)")
+  .option("--start-type <type>", "Optional explicit start node type")
+  .option("--session-id <id>", "Legacy start from session id")
+  .option("--task-id <id>", "Legacy start from task id")
+  .option("--relations <list>", "Comma-separated relation names, or 'any'", "any")
+  .option("--direction <direction>", "outbound|inbound|both", "outbound")
+  .option("--strategy <strategy>", "bfs|dfs", "bfs")
+  .option("--max-nodes <n>", "Maximum emitted nodes", "1000")
+  .option("--max-visited <n>", "Maximum visited nodes", "5000")
+  .option("--include-types <list>", "Comma-separated node types to include")
+  .option("--exclude-types <list>", "Comma-separated node types to exclude")
+  .option("--where <list>", "Comma-separated key=value property filters")
+  .option("--stream", "Emit NDJSON output as nodes are produced")
+  .option("--page-size <n>", "Paginate output to this many nodes per page")
+  .action(async (id: string | undefined, opts: {
+    hops: string;
+    depth?: string;
+    startId?: string;
+    startType?: string;
+    sessionId?: string;
+    taskId?: string;
+    relations?: string;
+    direction?: string;
+    strategy?: string;
+    maxNodes?: string;
+    maxVisited?: string;
+    includeTypes?: string;
+    excludeTypes?: string;
+    where?: string;
+    stream?: boolean;
+    pageSize?: string;
+  }) => {
+    const { conn } = await getProjectDb(process.cwd());
 
-    const hops = Math.max(1, parseInt(opts.hops ?? "2", 10));
+    try {
+      const depthRaw = opts.depth ?? opts.hops ?? "2";
+      if (opts.hops && !opts.depth) {
+        console.log(chalk.yellow("Warning: --hops is deprecated. Please use --depth instead."));
+      }
+      const depth = parseInt(depthRaw, 10);
+      if (Number.isNaN(depth) || depth < 0) {
+        throw new WalkError(400, `Invalid depth: ${depthRaw}. Expected integer >= 0.`);
+      }
 
-    // Find the seed node
-    let seedNode: GraphNode | null = null;
-    if (id) {
-      seedNode = await findNodeById(conn, id);
-      if (!seedNode) {
-        cerr(`No node matching "${id}". Try: pensieve search or pensieve tasks`);
+      const maxNodes = parseInt(opts.maxNodes ?? "1000", 10);
+      const maxVisited = parseInt(opts.maxVisited ?? "5000", 10);
+      const pageSizeRaw = opts.pageSize ? parseInt(opts.pageSize, 10) : undefined;
+      if (Number.isNaN(maxNodes) || maxNodes < 1) {
+        throw new WalkError(400, `Invalid max-nodes: ${opts.maxNodes}. Expected integer >= 1.`);
+      }
+      if (Number.isNaN(maxVisited) || maxVisited < 1) {
+        throw new WalkError(400, `Invalid max-visited: ${opts.maxVisited}. Expected integer >= 1.`);
+      }
+      if (pageSizeRaw !== undefined && (Number.isNaN(pageSizeRaw) || pageSizeRaw < 1)) {
+        throw new WalkError(400, `Invalid page-size: ${opts.pageSize}. Expected integer >= 1.`);
+      }
+
+      const direction = (opts.direction ?? "outbound").toLowerCase() as WalkDirection;
+      if (!["outbound", "inbound", "both"].includes(direction)) {
+        throw new WalkError(400, `Invalid direction: ${opts.direction}. Use outbound|inbound|both.`);
+      }
+
+      const strategy = (opts.strategy ?? "bfs").toLowerCase() as WalkStrategy;
+      if (!["bfs", "dfs"].includes(strategy)) {
+        throw new WalkError(400, `Invalid strategy: ${opts.strategy}. Use bfs|dfs.`);
+      }
+
+      const relations = (opts.relations ?? "any").trim().toLowerCase() === "any"
+        ? "any"
+        : (opts.relations ?? "")
+          .split(",")
+          .map((r) => r.trim())
+          .filter(Boolean);
+
+      const parseCsv = (value?: string): string[] =>
+        (value ?? "")
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
+
+      const parsePredicates = (value?: string): Array<{ key: string; value: string }> =>
+        parseCsv(value)
+          .map((pair) => {
+            const idx = pair.indexOf("=");
+            if (idx <= 0 || idx === pair.length - 1) {
+              throw new WalkError(400, `Invalid filter predicate: "${pair}". Use key=value.`);
+            }
+            return { key: pair.slice(0, idx).trim(), value: pair.slice(idx + 1).trim() };
+          });
+
+      const start = await resolveStartNode(conn, {
+        id,
+        startId: opts.startId,
+        startType: opts.startType,
+        sessionId: opts.sessionId,
+        taskId: opts.taskId,
+      });
+
+      const walk = await traverseDbGraph(conn, start.node, {
+        depth,
+        direction,
+        strategy,
+        relations,
+        maxNodes,
+        maxVisited,
+        stream: Boolean(opts.stream),
+        pageSize: pageSizeRaw,
+        filter: {
+          includeTypes: parseCsv(opts.includeTypes),
+          excludeTypes: parseCsv(opts.excludeTypes),
+          propertyPredicates: parsePredicates(opts.where),
+        },
+      });
+
+      if (opts.stream) {
+        for (const node of walk.nodes) {
+          console.log(JSON.stringify(node));
+        }
+        console.log(JSON.stringify({ metadata: walk.metadata }));
+        return;
+      }
+
+      const pageSize = pageSizeRaw ?? walk.metadata.pageSize;
+      if (walk.nodes.length === 0) {
+        console.log(chalk.yellow("No walk results matched the provided filters."));
+        const meta = walk.metadata;
+        console.log(chalk.dim(`visited=${meta.visitedCount} emitted=0 durationMs=${meta.durationMs}`));
+        return;
+      }
+      const pages = Math.max(1, Math.ceil(walk.nodes.length / pageSize));
+      for (let page = 0; page < pages; page++) {
+        const startIdx = page * pageSize;
+        const slice = walk.nodes.slice(startIdx, startIdx + pageSize);
+        if (pages > 1) {
+          console.log(chalk.bold.cyan(`\n── Graph Walk (page ${page + 1}/${pages})\n`));
+        }
+        formatWalkResults(slice, pages === 1);
+      }
+
+      const meta = walk.metadata;
+      const truncated = meta.truncated ? ` (truncated: ${meta.truncationReason})` : "";
+      console.log(
+        chalk.dim(
+          `visited=${meta.visitedCount} emitted=${meta.emittedCount} durationMs=${meta.durationMs}${truncated}`
+        )
+      );
+    } catch (err) {
+      if (err instanceof WalkError) {
+        cerr(err.message);
         process.exit(1);
       }
-    } else {
-      // Default: most recent Memory or Session
-      const { queryBuilder } = await import("./kuzu-helpers.js");
-      const recentRows = await queryBuilder(conn)
-        .cypher(`MATCH (n:Session)
-                 RETURN n ORDER BY n.startedAt DESC LIMIT 1`)
-        .all();
-
-      if (recentRows.length > 0) {
-        const node = recentRows[0]["n"] as Record<string, unknown>;
-        seedNode = {
-          id: String(node["id"]),
-          type: "Session",
-          label: String(node["title"] ?? ""),
-          properties: node,
-        };
-      } else {
-        cerr("No nodes found to walk from.");
-        process.exit(1);
-      }
+      throw err;
     }
-
-    const results = await walkGraph(conn, seedNode, hops);
-    formatWalkResults(results);
   });
 
 // ── Diff ─────────────────────────────────────────────────────────────────────
