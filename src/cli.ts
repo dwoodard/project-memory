@@ -23,6 +23,7 @@ import type { Turn } from "./types.js";
 import {
   type WalkDirection,
   type WalkStrategy,
+  type WalkOptions,
   WalkError,
   resolveStartNode,
   traverseDbGraph,
@@ -352,12 +353,20 @@ program
         }
         if (showWalk) {
           const seedNode: GraphNode = { id: String(r.id), type: "Memory", label: r.title, properties: { id: r.id, title: r.title, kind: r.kind } };
-          const walks = await walkGraph(conn, seedNode, walkHops);
-          if (walks.length > 1) {
-            console.log(`   ${chalk.cyan("↳ connected to:")}`);
-            for (const walk of walks.slice(1)) {
-              const relStr = walk.relations.length > 0 ? ` [${walk.relations.map((r) => r.type).join(", ")}]` : "";
-              console.log(`      ${chalk.dim("[" + walk.node.type + "]")} ${walk.node.label}${chalk.dim(relStr)}`);
+          const walkOptions: WalkOptions = {
+            depth: walkHops,
+            direction: "both",
+            relations: "any",
+            maxNodes: 100,
+            maxVisited: 500,
+          };
+          const walkResult = await traverseDbGraph(conn, seedNode, walkOptions);
+          if (walkResult.nodes.length > 1) {
+            console.log(`   ${chalk.cyan("↳ nested walk:")}`);
+            for (const walk of walkResult.nodes.slice(1)) {
+              const depthStr = walk.depth > 0 ? chalk.dim(` [d${walk.depth}]`) : "";
+              const relStr = walk.relations.length > 0 ? ` ${chalk.cyan(walk.relations.map((rel) => rel.type).join(", "))}` : "";
+              console.log(`      ${chalk.dim("[" + walk.node.type + "]")} ${walk.node.label}${relStr}${depthStr}`);
             }
           }
         }
@@ -367,11 +376,20 @@ program
         if (r.summary) console.log(`   ${chalk.dim(r.summary)}`);
         if (showWalk) {
           const seedNode: GraphNode = { id: String(r.id), type: "Task", label: r.title, properties: { id: r.id, title: r.title, status: r.status } };
-          const walks = await walkGraph(conn, seedNode, walkHops);
-          if (walks.length > 1) {
-            console.log(`   ${chalk.cyan("↳ graph:")}`);
-            for (const walk of walks.slice(1)) {
-              console.log(`      ${chalk.dim("[" + walk.node.type.toUpperCase() + "]")} ${walk.node.label}`);
+          const walkOptions: WalkOptions = {
+            depth: walkHops,
+            direction: "both",
+            relations: "any",
+            maxNodes: 100,
+            maxVisited: 500,
+          };
+          const walkResult = await traverseDbGraph(conn, seedNode, walkOptions);
+          if (walkResult.nodes.length > 1) {
+            console.log(`   ${chalk.cyan("↳ nested walk:")}`);
+            for (const walk of walkResult.nodes.slice(1)) {
+              const depthStr = walk.depth > 0 ? chalk.dim(` [d${walk.depth}]`) : "";
+              const relStr = walk.relations.length > 0 ? ` ${chalk.cyan(walk.relations.map((rel) => rel.type).join(", "))}` : "";
+              console.log(`      ${chalk.dim("[" + walk.node.type.toUpperCase() + "]")} ${walk.node.label}${relStr}${depthStr}`);
             }
           }
         }
@@ -383,11 +401,20 @@ program
         if (r.summary) console.log(`   ${chalk.dim(r.summary.slice(0, 120) + (r.summary.length > 120 ? "…" : ""))}`);
         if (showWalk) {
           const seedNode: GraphNode = { id: String(r.id), type: "Session", label: r.title, properties: { id: r.id, title: r.title, startedAt: r.startedAt } };
-          const walks = await walkGraph(conn, seedNode, walkHops);
-          if (walks.length > 1) {
-            console.log(`   ${chalk.cyan("↳ graph:")}`);
-            for (const walk of walks.slice(1)) {
-              console.log(`      ${chalk.dim("[" + walk.node.type.toUpperCase() + "]")} ${walk.node.label}`);
+          const walkOptions: WalkOptions = {
+            depth: walkHops,
+            direction: "both",
+            relations: "any",
+            maxNodes: 100,
+            maxVisited: 500,
+          };
+          const walkResult = await traverseDbGraph(conn, seedNode, walkOptions);
+          if (walkResult.nodes.length > 1) {
+            console.log(`   ${chalk.cyan("↳ nested walk:")}`);
+            for (const walk of walkResult.nodes.slice(1)) {
+              const depthStr = walk.depth > 0 ? chalk.dim(` [d${walk.depth}]`) : "";
+              const relStr = walk.relations.length > 0 ? ` ${chalk.cyan(walk.relations.map((rel) => rel.type).join(", "))}` : "";
+              console.log(`      ${chalk.dim("[" + walk.node.type.toUpperCase() + "]")} ${walk.node.label}${relStr}${depthStr}`);
             }
           }
         }
@@ -2188,101 +2215,6 @@ async function findNodeById(
   }
 
   return null;
-}
-
-async function walkGraph(
-  conn: InstanceType<typeof kuzu.Connection>,
-  startNode: GraphNode,
-  hops: number
-): Promise<WalkResult[]> {
-  const { queryBuilder } = await import("./kuzu-helpers.js");
-  const results: WalkResult[] = [];
-  const visited = new Set<string>();
-  const queue: Array<{ node: GraphNode; depth: number }> = [{ node: startNode, depth: 0 }];
-
-  // All relationship types to check
-  const relTypes = ["HAS_SESSION", "HAS_TASK", "HAS_MEMORY", "HAS_TURN", "REFERENCES", "RELATED_TO", "LINKED", "WORKED_ON"];
-
-  while (queue.length > 0) {
-    const { node, depth } = queue.shift()!;
-    if (visited.has(node.id) || depth > hops) continue;
-    visited.add(node.id);
-
-    const relations: WalkResult["relations"] = [];
-    const byRelType = new Map<string, Array<{ node: GraphNode; properties: Record<string, unknown> }>>();
-
-    // Check each relationship type from this node
-    for (const relType of relTypes) {
-      try {
-        const rows = await queryBuilder(conn)
-          .cypher(`MATCH (n:${node.type} {id: $id}) -[:${relType}]->(target)
-                   RETURN target`)
-          .param("id", node.id)
-          .all();
-        if (rows.length > 0) {
-          if (!byRelType.has(relType)) {
-            byRelType.set(relType, []);
-          }
-
-          for (const row of rows) {
-            const target = row["target"] as Record<string, unknown>;
-            const targetId = String(target["id"]);
-
-            // Detect target type from available fields (check specific fields first)
-            let targetType = "Unknown";
-            if (target["remoteUrl"]) {
-              targetType = "Project";
-            } else if (target["path"] && !target["userText"]) {
-              targetType = "File";
-            } else if (target["kind"]) {
-              targetType = "Memory";
-            } else if (target["status"] && target["taskOrder"] !== undefined) {
-              targetType = "Task";
-            } else if (target["startedAt"]) {
-              targetType = "Session";
-            } else if (target["userText"] || target["assistantText"]) {
-              targetType = "Turn";
-            }
-
-            let label = String(target["title"] ?? target["path"] ?? "");
-            if (targetType === "Turn" && target["userText"]) {
-              label = String(target["userText"]).slice(0, 60);
-            } else if (!label) {
-              label = targetId.slice(0, 8);
-            }
-
-            const targetNode: GraphNode = {
-              id: targetId,
-              type: targetType,
-              label,
-              properties: target,
-            };
-
-            byRelType.get(relType)!.push({ node: targetNode, properties: {} });
-
-            if (depth < hops && !visited.has(targetId)) {
-              queue.push({ node: targetNode, depth: depth + 1 });
-            }
-          }
-        }
-      } catch {
-        // This relationship type may not apply to this node type
-      }
-    }
-
-    for (const [type, targets] of byRelType.entries()) {
-      relations.push({ type, targets });
-    }
-
-    results.push({
-      node,
-      relations,
-      depth,
-      isSeed: depth === 0,
-    });
-  }
-
-  return results;
 }
 
 function formatWalkResults(results: WalkResult[], showHeader = true): void {
