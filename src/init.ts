@@ -1,9 +1,24 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { spawnSync } from "child_process";
 import { resolveProjectIdentity } from "./detect-project.js";
 import { getDb, applySchema } from "./db.js";
 import { DEFAULT_LLM, DEFAULT_EMBEDDING, type ProjectConfig } from "./config.js";
+
+function checkDependencies(): string[] {
+  const missing: string[] = [];
+  const dependencies = ["gh"]; // gh CLI required for GitHub integration
+
+  dependencies.forEach((cmd) => {
+    const result = spawnSync("which", [cmd], { stdio: "pipe" });
+    if (result.status !== 0) {
+      missing.push(cmd);
+    }
+  });
+
+  return missing;
+}
 
 export async function initProject(cwd: string): Promise<boolean> {
   // Use cwd directly as the project root — no git required
@@ -85,6 +100,15 @@ export async function initProject(cwd: string): Promise<boolean> {
   console.log(`  Hooks:  .claude/settings.json`);
   console.log(`  Cmds:   .claude/commands/pensieve-{search,recall,log,file,task,walk,diff}.md`);
   console.log(`  Run "pensieve config" to set your LLM and embedding models.`);
+
+  // Check for required dependencies
+  const missing = checkDependencies();
+  if (missing.length > 0) {
+    console.log(`\n  ⚠️  Missing dependencies (required for GitHub integration):`);
+    missing.forEach((cmd) => {
+      console.log(`    - ${cmd}: install with 'brew install gh' or see https://cli.github.com`);
+    });
+  }
 
   return true;
 }

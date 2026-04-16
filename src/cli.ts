@@ -943,7 +943,7 @@ function printTaskWithDetails(
   printSubtasks(String(t["id"]), subtasks, subtaskIndent);
 }
 
-function formatTaskTitleWithBranch(task: Record<string, unknown>): string {
+function formatTaskTitleWithBranch(task: Record<string, unknown>, ghIssues: Map<string, string> = new Map()): string {
   const branch = String(task["branch"] ?? "");
   const prUrl = String(task["prUrl"] ?? "");
   const status = String(task["status"] ?? "");
@@ -951,9 +951,11 @@ function formatTaskTitleWithBranch(task: Record<string, unknown>): string {
 
   let title = String(task["title"]);
 
-  // Prepend GitHub issue number if linked
+  // Prepend GitHub issue number with status if linked
   if (githubIssueId) {
-    title = `${chalk.cyan(`[#${githubIssueId}]`)}  ${title}`;
+    const issueStatus = ghIssues.get(githubIssueId) ?? "?";
+    const statusIcon = issueStatus === "open" ? "○" : "●";
+    title = `${chalk.cyan(`[#${githubIssueId} ${statusIcon} ${issueStatus}]`)}  ${title}`;
   }
 
   if (status === "in-review" && prUrl) {
@@ -980,7 +982,8 @@ function printTaskList(
   done: Record<string, unknown>[],
   subtasks: Record<string, unknown>[] = [],
   suggestedDone: Record<string, unknown>[] = [],
-  inReview: Record<string, unknown>[] = []
+  inReview: Record<string, unknown>[] = [],
+  ghIssues: Map<string, string> = new Map()
 ): void {
   if (!active && pending.length === 0 && blocked.length === 0 && done.length === 0 && suggestedDone.length === 0 && inReview.length === 0) {
     console.log("No tasks. Add one: pensieve tasks add \"title\"");
@@ -992,13 +995,13 @@ function printTaskList(
     console.log(chalk.bold.blue("\n  AWAITING REVIEW"));
     inReview.forEach((t) => {
       const prUrl = String(t["prUrl"] ?? "");
-      console.log(`  ${chalk.blue("◬")}  ${chalk.dim("[" + shortId(String(t["id"])) + "]")}  ${formatTaskTitleWithBranch(t)}`);
+      console.log(`  ${chalk.blue("◬")}  ${chalk.dim("[" + shortId(String(t["id"])) + "]")}  ${formatTaskTitleWithBranch(t, ghIssues)}`);
       if (prUrl) console.log(chalk.dim(`        ${prUrl}`));
     });
   }
 
   if (active) {
-    const titleLine = `\n${chalk.green("●")} ${chalk.bold.green("ACTIVE")} ${chalk.dim("[" + shortId(String(active["id"])) + "]")}   ${chalk.bold.green(formatTaskTitleWithBranch(active))}`;
+    const titleLine = `\n${chalk.green("●")} ${chalk.bold.green("ACTIVE")} ${chalk.dim("[" + shortId(String(active["id"])) + "]")}   ${chalk.bold.green(formatTaskTitleWithBranch(active, ghIssues))}`;
     printTaskWithDetails(
       active,
       titleLine,
@@ -1013,7 +1016,7 @@ function printTaskList(
   if (pending.length > 0) {
     console.log(chalk.bold("\n  QUEUE"));
     pending.forEach((t, i) => {
-      const titleLine = `  ${chalk.dim(String(i + 1).padStart(2))}  ${chalk.dim("[" + shortId(String(t["id"])) + "]")}  ${formatTaskTitleWithBranch(t)}`;
+      const titleLine = `  ${chalk.dim(String(i + 1).padStart(2))}  ${chalk.dim("[" + shortId(String(t["id"])) + "]")}  ${formatTaskTitleWithBranch(t, ghIssues)}`;
       printTaskWithDetails(
         t,
         titleLine,
@@ -1027,7 +1030,7 @@ function printTaskList(
   if (blocked.length > 0) {
     console.log(chalk.bold.yellow("\n  BLOCKED"));
     blocked.forEach((t) => {
-      const titleLine = `  ${chalk.yellow("✗")}  ${chalk.dim("[" + shortId(String(t["id"])) + "]")}  ${chalk.yellow(formatTaskTitleWithBranch(t))}`;
+      const titleLine = `  ${chalk.yellow("✗")}  ${chalk.dim("[" + shortId(String(t["id"])) + "]")}  ${chalk.yellow(formatTaskTitleWithBranch(t, ghIssues))}`;
       printTaskWithDetails(
         t,
         titleLine,
@@ -1042,7 +1045,7 @@ function printTaskList(
     console.log(chalk.bold.cyan("\n  MAY BE DONE"));
     suggestedDone.forEach((t) => {
       const id = shortId(String(t["id"]));
-      console.log(`  ${chalk.cyan("?")}  ${chalk.dim("[" + id + "]")}  ${chalk.cyan(formatTaskTitleWithBranch(t))}`);
+      console.log(`  ${chalk.cyan("?")}  ${chalk.dim("[" + id + "]")}  ${chalk.cyan(formatTaskTitleWithBranch(t, ghIssues))}`);
       if (t["doneSuggestion"]) {
         console.log(chalk.dim(`         "${String(t["doneSuggestion"]).slice(0, 100)}"`));
       }
@@ -1056,11 +1059,37 @@ function printTaskList(
       const id = shortId(String(t["id"]));
       const subCount = subtasks.filter((s) => String(s["parentId"]) === String(t["id"])).length;
       const subtasksBadge = subCount > 0 ? chalk.dim(` (${subCount} subtask${subCount > 1 ? "s" : ""})`) : "";
-      console.log(chalk.dim(`  ✓  [${id}]${subtasksBadge}  ${formatTaskTitleWithBranch(t)}`));
+      console.log(chalk.dim(`  ✓  [${id}]${subtasksBadge}  ${formatTaskTitleWithBranch(t, ghIssues)}`));
     });
   }
 
   console.log("");
+}
+
+async function fetchGitHubIssueStatus(): Promise<Map<string, string>> {
+  const issueMap = new Map<string, string>();
+  try {
+    // Fetch open issues from GitHub CLI
+    const result = spawnSync("gh", ["issue", "list", "--json", "number,state"], {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    if (result.status !== 0) {
+      return issueMap; // Silent fail — GH not available or not authed
+    }
+
+    const issues = JSON.parse(result.stdout ?? "[]") as Array<{ number: number; state: string }>;
+    // Store only open issues (filter out closed)
+    issues.forEach((issue) => {
+      if (issue.state === "open") {
+        issueMap.set(String(issue.number), "open");
+      }
+    });
+  } catch {
+    // Silent fail — GH CLI not available or parse error
+  }
+  return issueMap;
 }
 
 const tasksCmd = program
@@ -1074,6 +1103,9 @@ tasksCmd
     const opts = tasksCmd.opts();
     const { config, conn } = await getProjectDb(process.cwd());
     const pid = config.projectId;
+
+    // Fetch GitHub issue status in parallel
+    const ghIssues = await fetchGitHubIssueStatus();
 
     const activeRows = await queryAll(conn,
       `MATCH (m:Task {projectId: '${pid}', status: 'active'})
@@ -1112,7 +1144,8 @@ tasksCmd
       doneRows.map((r) => r["m"] as Record<string, unknown>),
       subtaskRows.map((r) => r["t"] as Record<string, unknown>),
       suggestedDoneRows.map((r) => r["m"] as Record<string, unknown>),
-      inReviewRows.map((r) => r["m"] as Record<string, unknown>)
+      inReviewRows.map((r) => r["m"] as Record<string, unknown>),
+      ghIssues
     );
   });
 
