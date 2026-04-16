@@ -21,12 +21,12 @@ function checkDependencies(): string[] {
 }
 
 /**
- * Ensure PLAYBOOK.md exists in the project for feature implementation guidance.
+ * Ensure PLAYBOOK.md exists in .pensieve for feature implementation guidance.
  * Copies template from pensieve package if not present.
  * Template is always located in: dist/templates/PLAYBOOK.md
  */
-function ensurePlaybook(projectRoot: string): void {
-  const playbookPath = path.join(projectRoot, "PLAYBOOK.md");
+function ensurePlaybook(projectMemoryDir: string): void {
+  const playbookPath = path.join(projectMemoryDir, "PLAYBOOK.md");
 
   // If PLAYBOOK already exists, we're done
   if (fs.existsSync(playbookPath)) {
@@ -158,7 +158,7 @@ export async function initProject(cwd: string): Promise<boolean> {
   console.log(`  Cmds:   .claude/commands/pensieve-{search,recall,log,file,task,walk,diff}.md`);
 
   // Create or discover PLAYBOOK.md for feature implementation workflow
-  ensurePlaybook(projectRoot);
+  ensurePlaybook(projectMemoryDir);
 
   console.log(`  Run "pensieve config" to set your LLM and embedding models.`);
 
