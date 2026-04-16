@@ -4,9 +4,10 @@ import * as crypto from "crypto";
 import type { Turn } from "./types.js";
 import type { ProjectConfig } from "./config.js";
 import type kuzu from "kuzu";
-import { queryBuilder } from "./kuzu-helpers.js";
+import { queryBuilder, escape } from "./kuzu-helpers.js";
 import { embed } from "./llm.js";
 import { extractFilePaths } from "./db.js";
+import { summarizeTurn } from "./summarize-turns.js";
 
 function langFromPath(p: string): string {
   const ext = p.split(".").pop() ?? "";
@@ -112,6 +113,23 @@ async function upsertTurnNode(
     .param("assistantText", assistantText)
     .param("embedding", [])
     .count();
+
+  // Auto-summarize long turns (fire and forget)
+  const totalLength = (userText ?? "").length + (assistantText ?? "").length;
+  if (totalLength > 300) {
+    summarizeTurn(entry.turnId, userText, assistantText)
+      .then((summary) => {
+        if (summary) {
+          conn
+            .query(
+              `MATCH (t:Turn {id: '${escape(entry.turnId)}'})
+               SET t.summary = '${escape(summary)}'`
+            )
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }
 
   // Count existing turns to assign a stable turnIndex
   const cntResult = await queryBuilder(conn)
