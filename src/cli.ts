@@ -945,7 +945,7 @@ function printTaskWithDetails(
 
 function formatTaskTitleWithBranch(task: Record<string, unknown>, ghIssues: Map<string, string> = new Map()): string {
   const branch = String(task["branch"] ?? "");
-  const prUrl = String(task["prUrl"] ?? "");
+  const githubPrUrl = String(task["githubPrUrl"] ?? task["prUrl"] ?? "");
   const status = String(task["status"] ?? "");
   const githubIssueId = String(task["githubIssueId"] ?? "");
 
@@ -958,11 +958,11 @@ function formatTaskTitleWithBranch(task: Record<string, unknown>, ghIssues: Map<
     title = `${chalk.cyan(`[#${githubIssueId} ${statusIcon} ${issueStatus}]`)}  ${title}`;
   }
 
-  if (status === "in-review" && prUrl) {
+  if (status === "in-review" && githubPrUrl) {
     // Extract PR number from URL: either #123 or /pull/123
     let prNum = "?";
-    const hashMatch = prUrl.match(/#(\d+)/);
-    const pullMatch = prUrl.match(/\/pull\/(\d+)/);
+    const hashMatch = githubPrUrl.match(/#(\d+)/);
+    const pullMatch = githubPrUrl.match(/\/pull\/(\d+)/);
     if (hashMatch) prNum = hashMatch[1];
     else if (pullMatch) prNum = pullMatch[1];
     return `${title}  ${chalk.blue(`[PR #${prNum} — awaiting review]`)}`;
@@ -994,9 +994,9 @@ function printTaskList(
   if (inReview.length > 0) {
     console.log(chalk.bold.blue("\n  AWAITING REVIEW"));
     inReview.forEach((t) => {
-      const prUrl = String(t["prUrl"] ?? "");
+      const githubPrUrl = String(t["githubPrUrl"] ?? t["prUrl"] ?? "");
       console.log(`  ${chalk.blue("◬")}  ${chalk.dim("[" + shortId(String(t["id"])) + "]")}  ${formatTaskTitleWithBranch(t, ghIssues)}`);
-      if (prUrl) console.log(chalk.dim(`        ${prUrl}`));
+      if (githubPrUrl) console.log(chalk.dim(`        ${githubPrUrl}`));
     });
   }
 
@@ -1650,7 +1650,7 @@ tasksCmd
 
     const task = all.find((t) => String(t["id"]) === targetId);
     await conn.query(
-      `MATCH (t:Task {id: '${esc(targetId)}'}) SET t.prUrl = '${esc(url)}', t.status = 'in-review'`
+      `MATCH (t:Task {id: '${esc(targetId)}'}) SET t.githubPrUrl = '${esc(url)}', t.status = 'in-review'`
     );
     console.log(`${chalk.green("PR recorded:")} ${task?.["title"]}`);
     console.log(chalk.dim(`  ${url}`));

@@ -54,7 +54,7 @@ export interface Task {
   activatedAt?: string;
   embedding?: number[];
   branch?: string;
-  prUrl?: string;
+  githubPrUrl?: string;
   githubIssueId?: string;
 }
 
