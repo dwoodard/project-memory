@@ -195,6 +195,8 @@ export async function applySchema(
   try { await conn.query(`ALTER TABLE Memory ADD decisionStatus STRING DEFAULT 'pending'`); } catch { /* exists */ }
   try { await conn.query(`ALTER TABLE Memory ADD statusUpdatedAt STRING DEFAULT ''`); } catch { /* exists */ }
   try { await conn.query(`ALTER TABLE Memory ADD statusNote STRING DEFAULT ''`); } catch { /* exists */ }
+  try { await conn.query(`ALTER TABLE Memory ADD supersededBy STRING DEFAULT ''`); } catch { /* exists */ }
+  try { await conn.query(`ALTER TABLE Memory ADD abandonReason STRING DEFAULT ''`); } catch { /* exists */ }
   try { await conn.query(`ALTER TABLE Turn ADD summary STRING DEFAULT ''`); } catch { /* exists */ }
   try { await conn.query(`ALTER TABLE Turn ADD summarizedAt STRING DEFAULT ''`); } catch { /* exists */ }
 

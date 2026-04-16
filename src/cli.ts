@@ -592,7 +592,9 @@ program
   .description("Update a decision's status")
   .option("--status <status>", "New status: pending, implemented, blocked, superseded, abandoned")
   .option("--note <note>", "Optional note about the status change")
-  .action(async (id: string, opts: { status?: string; note?: string }) => {
+  .option("--superseded-by <id>", "ID of the decision that supersedes this one (for --status superseded)")
+  .option("--abandoned-reason <reason>", "Reason for abandoning (for --status abandoned)")
+  .action(async (id: string, opts: any) => {
     if (!opts.status) {
       cerr("--status is required");
       process.exit(1);
@@ -608,7 +610,12 @@ program
     const { updateDecisionStatus } = await import("./update-decision-status.js");
 
     try {
-      await updateDecisionStatus(conn, id, opts.status as any, opts.note);
+      const updateOptions: any = {};
+      if (opts.note) updateOptions.note = opts.note;
+      if (opts.supersededBy) updateOptions.supersededBy = opts.supersededBy;
+      if (opts.abandonedReason) updateOptions.abandonReason = opts.abandonedReason;
+
+      await updateDecisionStatus(conn, id, opts.status as any, updateOptions);
       console.log(chalk.green(`✓ Decision ${id} marked as ${opts.status}`));
     } catch (err: any) {
       cerr(`Failed to update decision: ${err.message}`);
