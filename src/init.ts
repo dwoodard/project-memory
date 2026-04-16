@@ -52,14 +52,14 @@ function ensurePlaybook(projectMemoryDir: string): void {
 }
 
 function installAIPrompts(projectMemoryDir: string): void {
-  // Find the package root (where docs/ai-prompts/ lives)
-  const packageRoot = path.resolve(path.dirname(__filename), "..");
-  const promptsSourceDir = path.join(packageRoot, "docs", "ai-prompts");
+  // AI prompts are bundled in dist/ai-prompts during build
+  // __dirname in dist/init.js points to dist/
+  const promptsSourceDir = path.join(__dirname, "ai-prompts");
   const promptsDestDir = path.join(projectMemoryDir, "ai-prompts");
 
   // Only install if source exists
   if (!fs.existsSync(promptsSourceDir)) {
-    return; // Silently skip if not found
+    return; // Silently skip if not found (acceptable for development)
   }
 
   // Create destination directory
