@@ -946,9 +946,15 @@ function formatTaskTitleWithBranch(task: Record<string, unknown>, ghIssues: Map<
 
   // Prepend GitHub issue number with status if linked
   if (githubIssueId) {
-    const issueStatus = ghIssues.get(githubIssueId) ?? "?";
-    const statusIcon = issueStatus === "open" ? "○" : "●";
-    title = `${chalk.cyan(`[#${githubIssueId} ${statusIcon} ${issueStatus}]`)}  ${title}`;
+    const issueStatus = ghIssues.get(githubIssueId);
+    // Show only if status was successfully fetched, otherwise show issue number only
+    if (issueStatus) {
+      const statusIcon = issueStatus === "open" ? "○" : "●";
+      title = `${chalk.cyan(`[#${githubIssueId} ${statusIcon} ${issueStatus}]`)}  ${title}`;
+    } else {
+      // Status not fetched (gh CLI unavailable or not linked properly)
+      title = `${chalk.dim(`[#${githubIssueId}]`)}  ${title}`;
+    }
   }
 
   if (status === "in-review" && githubPrUrl) {
@@ -978,6 +984,9 @@ function printTaskList(
     console.log("No tasks. Add one: pensieve tasks add \"title\"");
     return;
   }
+
+  // Show legend for status indicators
+  console.log(chalk.dim("  Legend: [#N ○ open] = linked to open issue, [#N] = linked (status unavailable), ✓ = done, ✗ = blocked, ? = suggested done\n"));
 
   // Show in-review tasks first
   if (inReview.length > 0) {
