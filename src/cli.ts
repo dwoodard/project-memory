@@ -2144,7 +2144,7 @@ function formatWalkResults(results: WalkResult[], showHeader = true): void {
 program
   .command("walk [id]")
   .description("Traverse graph from any node with relation/direction/depth controls")
-  .option("-n, --hops <n>", "Legacy alias for --depth", "2")
+  .option("-n, --hops <n>", "Deprecated: use --depth instead")
   .option("--depth <n>", "Traversal depth (>= 0)")
   .option("--start-id <id>", "Start from a specific node id (supports selectors like memory:<id>)")
   .option("--start-type <type>", "Optional explicit start node type")
@@ -2182,6 +2182,9 @@ program
 
     try {
       const depthRaw = opts.depth ?? opts.hops ?? "2";
+      if (opts.hops && !opts.depth) {
+        console.log(chalk.yellow("Warning: --hops is deprecated. Please use --depth instead."));
+      }
       const depth = parseInt(depthRaw, 10);
       if (Number.isNaN(depth) || depth < 0) {
         throw new WalkError(400, `Invalid depth: ${depthRaw}. Expected integer >= 0.`);
@@ -2266,6 +2269,12 @@ program
       }
 
       const pageSize = pageSizeRaw ?? walk.metadata.pageSize;
+      if (walk.nodes.length === 0) {
+        console.log(chalk.yellow("No walk results matched the provided filters."));
+        const meta = walk.metadata;
+        console.log(chalk.dim(`visited=${meta.visitedCount} emitted=0 durationMs=${meta.durationMs}`));
+        return;
+      }
       const pages = Math.max(1, Math.ceil(walk.nodes.length / pageSize));
       for (let page = 0; page < pages; page++) {
         const startIdx = page * pageSize;

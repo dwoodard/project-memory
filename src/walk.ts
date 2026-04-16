@@ -51,7 +51,6 @@ export interface WalkMetadata {
   truncated: boolean;
   truncationReason?: "maxNodes" | "maxVisited";
   pageSize: number;
-  hasMore: boolean;
 }
 
 export interface WalkTraversalResult {
@@ -85,6 +84,7 @@ const DEFAULT_RELATIONS = [
 ] as const;
 
 const KNOWN_NODE_TYPES = ["Project", "Session", "Task", "Memory", "Turn", "File"] as const;
+const TYPES_WITH_TITLE = new Set(["Session", "Task", "Memory"]);
 
 const TYPE_ALIASES: Record<string, string> = {
   project: "Project",
@@ -294,7 +294,6 @@ export async function traverseGraph(
     truncated: Boolean(truncationReason),
     truncationReason,
     pageSize,
-    hasMore: Boolean(truncationReason),
   };
 
   return { nodes, metadata };
@@ -335,7 +334,7 @@ async function findNodeByTypeAndId(
     return nodeFromRecord(partialRows[0]["n"] as Record<string, unknown>, type);
   }
 
-  if (["Session", "Task", "Memory"].includes(type)) {
+  if (TYPES_WITH_TITLE.has(type)) {
     const titleRows = await queryAllRows(
       conn,
       `MATCH (n:${type}) WHERE n.title CONTAINS $id RETURN n LIMIT 1`,
