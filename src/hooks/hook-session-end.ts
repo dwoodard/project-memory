@@ -6,6 +6,7 @@
  */
 
 import * as fs from "fs";
+import { execSync } from "child_process";
 import { findProjectMemoryDir } from "./hook-utils.js";
 import { readProjectConfig } from "../config.js";
 import { getDb } from "../db.js";
@@ -49,37 +50,46 @@ async function main(): Promise<void> {
     const rawLog = readSessionTurns(projectMemoryDir, sessionId);
     if (rawLog && config.llm?.model && config.llm.model !== "local-model") {
       try {
-        const { title, summary } = await summarizeSession(rawLog, config.projectName);
+        const { title, summary, tags } = await summarizeSession(rawLog, config.projectName);
         if (title || summary) {
+          const setClause = [
+            `s.title = '${escape(title)}'`,
+            `s.summary = '${escape(summary)}'`,
+            `s.endedAt = '${escape(now)}'`
+          ];
+          if (tags) setClause.push(`s.tags = '${escape(tags)}'`);
+
           await conn.query(
             `MATCH (s:Session {id: '${escape(sessionId)}'})
-             SET s.title = '${escape(title)}',
-                 s.summary = '${escape(summary)}',
-                 s.endedAt = '${escape(now)}',
-                 s.endReason = '${escape(payload.reason || "normal")}'`
+             SET ${setClause.join(', ')}`
           );
+          // Close session with summarization
+          if (summary) {
+            try {
+              execSync(`pensieve sessions -c --summarize "${summary.replace(/"/g, '\\"')}"`, { stdio: "pipe" });
+            } catch {
+              // Never block on sessions close
+            }
+          }
         } else {
           // No summary generated, just set end metadata
           await conn.query(
             `MATCH (s:Session {id: '${escape(sessionId)}'})
-             SET s.endedAt = '${escape(now)}',
-                 s.endReason = '${escape(payload.reason || "normal")}'`
+             SET s.endedAt = '${escape(now)}'`
           );
         }
       } catch {
         // If summarization fails, still set end metadata
         await conn.query(
           `MATCH (s:Session {id: '${escape(sessionId)}'})
-           SET s.endedAt = '${escape(now)}',
-               s.endReason = '${escape(payload.reason || "normal")}'`
+           SET s.endedAt = '${escape(now)}'`
         );
       }
     } else {
       // No LLM or local model, just set end metadata
       await conn.query(
         `MATCH (s:Session {id: '${escape(sessionId)}'})
-         SET s.endedAt = '${escape(now)}',
-             s.endReason = '${escape(payload.reason || "normal")}'`
+         SET s.endedAt = '${escape(now)}'`
       );
     }
 

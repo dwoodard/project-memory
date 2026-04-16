@@ -53,12 +53,18 @@ async function main(): Promise<void> {
     let sessionSummary = "";
     if (rawLog) {
       try {
-        const { title, summary } = await summarizeSession(rawLog, config.projectName);
+        const { title, summary, tags } = await summarizeSession(rawLog, config.projectName);
         sessionSummary = summary;
         if (title || summary) {
+          const setClause = [
+            `s.title = '${escape(title)}'`,
+            `s.summary = '${escape(summary)}'`
+          ];
+          if (tags) setClause.push(`s.tags = '${escape(tags)}'`);
+
           await conn.query(
             `MATCH (s:Session {id: '${escape(sessionId)}'})
-             SET s.title = '${escape(title)}', s.summary = '${escape(summary)}'`
+             SET ${setClause.join(', ')}`
           );
         }
       } catch {

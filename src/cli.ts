@@ -1928,7 +1928,8 @@ sessionsCmd
   .option("--title <text>", "Update session title")
   .option("--summarize <text>", "Close session and set summary")
   .option("--tags <tags>", "Update session tags (comma-separated)")
-  .action(async (id: string | undefined, opts: { all?: boolean; current?: boolean; title?: string; summarize?: string; tags?: string }) => {
+  .option("--backfill", "Re-generate title, summary, and tags from session turns")
+  .action(async (id: string | undefined, opts: { all?: boolean; current?: boolean; title?: string; summarize?: string; tags?: string; backfill?: boolean }) => {
     const { config, conn } = await getProjectDb(process.cwd());
     const pid = config.projectId;
 
@@ -1961,6 +1962,35 @@ sessionsCmd
       // Update session properties if provided
       const { escape: esc } = await import("./kuzu-helpers.js");
       const updates: string[] = [];
+
+      // Handle --backfill (re-generate title, summary, tags from session turns)
+      if (opts.backfill) {
+        const { readSessionTurns } = await import("./update-summary.js");
+        const { summarizeSession } = await import("./extract-memory.js");
+        const rawLog = readSessionTurns(process.cwd() + "/.pensieve", sid);
+        if (rawLog && config.llm?.model && config.llm.model !== "local-model") {
+          try {
+            const { title, summary, tags } = await summarizeSession(rawLog, config.projectName);
+            if (title) {
+              updates.push(`s.title = '${esc(title)}'`);
+              match["title"] = title;
+            }
+            if (summary) {
+              updates.push(`s.summary = '${esc(summary)}'`);
+              match["summary"] = summary;
+            }
+            if (tags) {
+              updates.push(`s.tags = '${esc(tags)}'`);
+              match["tags"] = tags;
+            }
+            console.log(chalk.green("✓ Generated title, summary, and tags"));
+          } catch (e) {
+            cerr(`Failed to backfill session: ${e}`);
+          }
+        } else {
+          cerr("Cannot backfill: no LLM configured or using local model");
+        }
+      }
 
       // Handle --summarize (close session + set summary)
       if (opts.summarize) {

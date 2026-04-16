@@ -245,16 +245,17 @@ Here is the raw conversation log from this session:
 Generate:
 1. A short title (max 60 chars) capturing the main topic or goal of this session
 2. A 2-3 sentence summary of what was discussed and accomplished
+3. 2-4 tags (comma-separated) for quick categorization (e.g., "bugfix,testing", "refactor,perf", "docs,cleanup")
 
 Respond with JSON only. No markdown fences.
-{"title": "...", "summary": "..."}`;
+{"title": "...", "summary": "...", "tags": "..."}`;
 
 export async function summarizeSession(
   rawLog: string,
   projectName: string,
   projectRoot?: string
-): Promise<{ title: string; summary: string }> {
-  if (!rawLog.trim()) return { title: "", summary: "" };
+): Promise<{ title: string; summary: string; tags: string }> {
+  if (!rawLog.trim()) return { title: "", summary: "", tags: "" };
   const truncatedLog = rawLog.length > 8000 ? rawLog.slice(0, 8000) + "\n...[truncated]" : rawLog;
   const basePrompt = loadPrompt("session-summary-rules", DEFAULT_SESSION_SUMMARY_PROMPT, projectRoot);
   const prompt = basePrompt
@@ -268,9 +269,10 @@ export async function summarizeSession(
     return {
       title: String(parsed.title ?? "").slice(0, 60),
       summary: String(parsed.summary ?? ""),
+      tags: String(parsed.tags ?? ""),
     };
   } catch {
-    return { title: "", summary: "" };
+    return { title: "", summary: "", tags: "" };
   }
 }
 

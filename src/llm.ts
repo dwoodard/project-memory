@@ -1,5 +1,5 @@
 import { readProjectConfig } from "./config.js";
-import { findProjectMemoryDir } from "./hook-utils.js";
+import { findProjectMemoryDir } from "./hooks/hook-utils.js";
 
 interface OpenAIResponse {
   choices: Array<{
